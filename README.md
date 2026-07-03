@@ -64,7 +64,7 @@ src/
 
 ## 后端接口对接边界
 
-当前工作台主体数据仍来自 `src/mock/knowledgeData.ts`，登录已通过 `src/services/authApi.ts` 对接后端。后续继续接 `knowledge-base` 后端时，替换为这些接口：
+当前登录和工作台主体数据已经通过 `src/services/authApi.ts`、`src/services/workspaceApi.ts` 对接 `knowledge-base` 后端：
 
 - `/api/auth/login`
 - `/api/auth/me`
@@ -72,4 +72,5 @@ src/
 - `/api/spaces/{spaceId}/documents`
 - `/api/spaces/{spaceId}/chat/sessions`
 - `/api/chat/sessions/{sessionId}/messages`
-- `/api/chat/sessions/{sessionId}/messages/stream`
+
+`src/mock/knowledgeData.ts` 保留为样例数据参考，不再作为工作台默认数据源。

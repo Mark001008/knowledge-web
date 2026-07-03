@@ -22,5 +22,5 @@ export function App() {
     return <LoginPage onLogin={handleLogin} />;
   }
 
-  return <WorkspaceApp user={user} onLogout={handleLogout} />;
+  return <WorkspaceApp token={session.accessToken} user={user} onLogout={handleLogout} />;
 }

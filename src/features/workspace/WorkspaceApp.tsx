@@ -1,9 +1,18 @@
-import { type FormEvent, useMemo, useState } from "react";
-import { initialAuditLogs, initialSpaces } from "../../mock/knowledgeData";
+import { type FormEvent, useEffect, useMemo, useState } from "react";
+import {
+  createChatSession,
+  createKnowledgeSpace,
+  deleteDocument,
+  loadWorkspace,
+  reindexDocument,
+  sendChatMessage,
+  uploadDocument
+} from "../../services/workspaceApi";
 import { statusClass, statusLabel } from "../../shared/status";
 import type { AuditLog, Citation, DetailTab, KnowledgeDocument, KnowledgeSpace, RouteKey, UserInfo } from "../../shared/types/domain";
 
 interface WorkspaceAppProps {
+  token: string;
   user: UserInfo;
   onLogout: () => void;
 }
@@ -15,18 +24,20 @@ const guardrails = [
   ["敏感配置", "模型密钥通过环境变量注入", "info"]
 ];
 
-export function WorkspaceApp({ user, onLogout }: WorkspaceAppProps) {
+export function WorkspaceApp({ token, user, onLogout }: WorkspaceAppProps) {
   const [route, setRoute] = useState<RouteKey>("spaces");
   const [activeSpaceId, setActiveSpaceId] = useState<number | null>(null);
   const [activeTab, setActiveTab] = useState<DetailTab>("documents");
   const [activeSessionId, setActiveSessionId] = useState<number | null>(null);
-  const [spaces, setSpaces] = useState<KnowledgeSpace[]>(() => structuredClone(initialSpaces));
-  const [auditLogs, setAuditLogs] = useState<AuditLog[]>(() => structuredClone(initialAuditLogs));
+  const [spaces, setSpaces] = useState<KnowledgeSpace[]>([]);
+  const [auditLogs, setAuditLogs] = useState<AuditLog[]>([]);
   const [keyword, setKeyword] = useState("");
   const [citation, setCitation] = useState<Citation | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [apiError, setApiError] = useState("");
   const displayName = user.displayName || user.username || "管理员";
-  const activeSpace = spaces.find((space) => space.id === activeSpaceId) || spaces[0];
-  const activeSession = activeSpace.sessions.find((session) => session.id === activeSessionId) || activeSpace.sessions[0];
+  const activeSpace = spaces.find((space) => space.id === activeSpaceId) || spaces[0] || null;
+  const activeSession = activeSpace?.sessions.find((session) => session.id === activeSessionId) || activeSpace?.sessions[0] || null;
   const documents = spaces.flatMap((space) => space.documents);
   const filteredSpaces = spaces.filter((space) => {
     const text = `${space.name} ${space.description}`.toLowerCase();
@@ -35,8 +46,8 @@ export function WorkspaceApp({ user, onLogout }: WorkspaceAppProps) {
 
   const metrics = useMemo(() => {
     const sessionCount = spaces.reduce((sum, space) => sum + space.sessions.length, 0);
-    const hitRate = Math.round(spaces.reduce((sum, space) => sum + space.hitRate, 0) / spaces.length);
-    const latency = spaces.reduce((sum, space) => sum + space.avgLatency, 0) / spaces.length;
+    const hitRate = spaces.length ? Math.round(spaces.reduce((sum, space) => sum + space.hitRate, 0) / spaces.length) : 0;
+    const latency = spaces.length ? spaces.reduce((sum, space) => sum + space.avgLatency, 0) / spaces.length : 0;
     return {
       spaceCount: spaces.length,
       documentCount: documents.length,
@@ -48,6 +59,27 @@ export function WorkspaceApp({ user, onLogout }: WorkspaceAppProps) {
       lowConfidenceCount: 2
     };
   }, [documents, spaces]);
+
+  useEffect(() => {
+    refreshWorkspace();
+  }, [token]);
+
+  async function refreshWorkspace() {
+    setLoading(true);
+    setApiError("");
+    try {
+      const nextSpaces = await loadWorkspace(token);
+      setSpaces(nextSpaces);
+      if (!activeSpaceId && nextSpaces[0]) {
+        setActiveSpaceId(null);
+        setActiveSessionId(nextSpaces[0].sessions[0]?.id || null);
+      }
+    } catch (error) {
+      setApiError(error instanceof TypeError ? "无法连接后端服务，请确认服务已启动" : (error as Error).message);
+    } finally {
+      setLoading(false);
+    }
+  }
 
   function openRoute(nextRoute: RouteKey) {
     setRoute(nextRoute);
@@ -63,100 +95,109 @@ export function WorkspaceApp({ user, onLogout }: WorkspaceAppProps) {
   }
 
   function updateActiveSpace(updater: (space: KnowledgeSpace) => KnowledgeSpace) {
+    if (!activeSpace) return;
     setSpaces((current) => current.map((space) => (space.id === activeSpace.id ? updater(space) : space)));
   }
 
-  function createSpace() {
-    const nextId = Math.max(...spaces.map((space) => space.id)) + 1;
-    const nextSpace: KnowledgeSpace = {
-      id: nextId,
-      name: `新知识库 ${nextId}`,
-      description: "用于整理新上传的业务资料。",
-      visibility: "PRIVATE",
-      topK: 5,
-      threshold: 0.7,
-      temperature: 0.2,
-      hitRate: 0,
-      avgLatency: 0,
-      members: [{ id: Date.now(), name: "管理员", role: "知识库管理员", scope: "全部权限", status: "ACTIVE" }],
-      updatedAt: "刚刚",
-      documents: [],
-      sessions: []
-    };
-    setSpaces((current) => [nextSpace, ...current]);
-    setAuditLogs((current) => [{ actor: "管理员", action: "创建知识库", target: nextSpace.name, time: "刚刚" }, ...current]);
+  async function createSpace() {
+    setApiError("");
+    try {
+      const nextSpace = await createKnowledgeSpace(token);
+      setSpaces((current) => [nextSpace, ...current]);
+      setAuditLogs((current) => [{ actor: displayName, action: "创建知识库", target: nextSpace.name, time: "刚刚" }, ...current]);
+    } catch (error) {
+      setApiError(error instanceof TypeError ? "无法连接后端服务，请确认服务已启动" : (error as Error).message);
+    }
   }
 
-  function createSession() {
-    const session = { id: Date.now(), title: "新会话", updatedAt: "刚刚", messages: [] };
-    updateActiveSpace((space) => ({ ...space, sessions: [session, ...space.sessions] }));
-    setActiveSessionId(session.id);
-    setAuditLogs((current) => [{ actor: "管理员", action: "新建问答会话", target: activeSpace.name, time: "刚刚" }, ...current]);
+  async function createSession() {
+    if (!activeSpace) return null;
+    setApiError("");
+    try {
+      const session = await createChatSession(token, activeSpace.id);
+      updateActiveSpace((space) => ({ ...space, sessions: [session, ...space.sessions] }));
+      setActiveSessionId(session.id);
+      setAuditLogs((current) => [{ actor: displayName, action: "新建问答会话", target: activeSpace.name, time: "刚刚" }, ...current]);
+      return session;
+    } catch (error) {
+      setApiError(error instanceof TypeError ? "无法连接后端服务，请确认服务已启动" : (error as Error).message);
+      return null;
+    }
   }
 
-  function sendQuestion(event: FormEvent<HTMLFormElement>) {
+  async function sendQuestion(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const form = event.currentTarget;
     const input = new FormData(form).get("question")?.toString().trim();
-    if (!input) return;
+    if (!input || !activeSpace) return;
     form.reset();
+    setApiError("");
 
-    updateActiveSpace((space) => {
-      const session = space.sessions.find((item) => item.id === activeSession?.id) || {
-        id: Date.now(),
-        title: "新会话",
-        updatedAt: "刚刚",
-        messages: []
-      };
-      const completedDoc = space.documents.find((doc) => doc.status === "COMPLETED");
-      const answer = completedDoc
-        ? {
-            role: "assistant" as const,
-            content: "根据当前知识库命中的资料，建议先核对文档中的配置前置条件，再按引用片段中的步骤执行。以下回答仅基于已索引文档生成。",
-            citations: [
-              {
-                id: `c-${Date.now()}`,
-                documentId: completedDoc.id,
-                documentName: completedDoc.fileName,
-                chunkId: 3001,
-                pageNumber: completedDoc.fileType === "PDF" ? 5 : null,
-                chunkIndex: 12,
-                score: 0.812436,
-                quoteText: "配置前应确认管理员权限、回调地址和默认角色设置。保存配置后，使用测试账号验证完整登录或问答链路。"
-              }
-            ]
-          }
-        : { role: "assistant" as const, content: "当前知识库中未找到相关信息。", citations: [] };
-      const nextSession = {
-        ...session,
-        title: session.title === "新会话" ? input.slice(0, 14) : session.title,
-        updatedAt: "刚刚",
-        messages: [...session.messages, { role: "user" as const, content: input }, answer]
-      };
-      const otherSessions = space.sessions.filter((item) => item.id !== nextSession.id);
-      setActiveSessionId(nextSession.id);
-      return { ...space, sessions: [nextSession, ...otherSessions] };
-    });
-    setAuditLogs((current) => [{ actor: "管理员", action: `提问 ${input.slice(0, 18)}`, target: activeSpace.name, time: "刚刚" }, ...current]);
+    const session = activeSession || (await createSession());
+    if (!session) return;
+
+    updateActiveSpace((space) => ({
+      ...space,
+      sessions: space.sessions.map((item) =>
+        item.id === session.id
+          ? { ...item, messages: [...item.messages, { role: "user", content: input }], updatedAt: "刚刚" }
+          : item
+      )
+    }));
+
+    try {
+      const answer = await sendChatMessage(token, session.id, input);
+      updateActiveSpace((space) => ({
+        ...space,
+        sessions: space.sessions.map((item) =>
+          item.id === session.id
+            ? { ...item, messages: [...item.messages, answer], updatedAt: "刚刚" }
+            : item
+        )
+      }));
+      setAuditLogs((current) => [{ actor: displayName, action: `提问 ${input.slice(0, 18)}`, target: activeSpace.name, time: "刚刚" }, ...current]);
+    } catch (error) {
+      setApiError(error instanceof TypeError ? "无法连接后端服务，请确认服务已启动" : (error as Error).message);
+    }
   }
 
-  function addDocument(file: File) {
-    const ext = file.name.split(".").pop()?.toUpperCase() || "FILE";
-    const doc: KnowledgeDocument = {
-      id: Date.now(),
-      fileName: file.name,
-      fileType: ext === "MD" || ext === "MARKDOWN" ? "Markdown" : ext,
-      fileSize: `${Math.max(1, Math.round(file.size / 1024))} KB`,
-      uploadedBy: "管理员",
-      status: "PENDING",
-      updatedAt: "刚刚",
-      errorMessage: ""
-    };
-    updateActiveSpace((space) => ({ ...space, documents: [doc, ...space.documents] }));
-    setAuditLogs((current) => [{ actor: "管理员", action: `上传 ${file.name}`, target: activeSpace.name, time: "刚刚" }, ...current]);
+  async function addDocument(file: File) {
+    if (!activeSpace) return;
+    setApiError("");
+    try {
+      const documents = await uploadDocument(token, activeSpace.id, file);
+      updateActiveSpace((space) => ({ ...space, documents }));
+      setAuditLogs((current) => [{ actor: displayName, action: `上传 ${file.name}`, target: activeSpace.name, time: "刚刚" }, ...current]);
+    } catch (error) {
+      setApiError(error instanceof TypeError ? "无法连接后端服务，请确认服务已启动" : (error as Error).message);
+    }
   }
 
-  const pageTitle = route === "recent" ? "最近问答" : route === "operations" ? "运营看板" : activeSpaceId ? activeSpace.name : "知识库";
+  async function handleDeleteDocument(documentId: number) {
+    if (!activeSpace) return;
+    setApiError("");
+    try {
+      await deleteDocument(token, documentId);
+      updateActiveSpace((space) => ({ ...space, documents: space.documents.filter((doc) => doc.id !== documentId) }));
+    } catch (error) {
+      setApiError(error instanceof TypeError ? "无法连接后端服务，请确认服务已启动" : (error as Error).message);
+    }
+  }
+
+  async function handleReindexDocument(documentId: number) {
+    setApiError("");
+    try {
+      await reindexDocument(token, documentId);
+      updateActiveSpace((space) => ({
+        ...space,
+        documents: space.documents.map((doc) => (doc.id === documentId ? { ...doc, status: "PENDING", errorMessage: "", updatedAt: "刚刚" } : doc))
+      }));
+    } catch (error) {
+      setApiError(error instanceof TypeError ? "无法连接后端服务，请确认服务已启动" : (error as Error).message);
+    }
+  }
+
+  const pageTitle = route === "recent" ? "最近问答" : route === "operations" ? "运营看板" : activeSpaceId && activeSpace ? activeSpace.name : "知识库";
 
   return (
     <main className="app-shell">
@@ -200,7 +241,17 @@ export function WorkspaceApp({ user, onLogout }: WorkspaceAppProps) {
           </div>
         </header>
 
-        {route === "spaces" && !activeSpaceId ? (
+        {apiError ? (
+          <div className="form-error surface">{apiError}</div>
+        ) : null}
+
+        {loading ? (
+          <section className="surface">
+            <div className="citation-empty">正在加载知识库数据...</div>
+          </section>
+        ) : null}
+
+        {!loading && route === "spaces" && !activeSpaceId ? (
           <section className="page-stack">
             <MetricGrid
               items={[
@@ -250,12 +301,13 @@ export function WorkspaceApp({ user, onLogout }: WorkspaceAppProps) {
                     </button>
                   </article>
                 ))}
+                {!filteredSpaces.length ? <div className="citation-empty">暂无知识库，点击右上角创建。</div> : null}
               </div>
             </section>
           </section>
         ) : null}
 
-        {route === "spaces" && activeSpaceId ? (
+        {!loading && route === "spaces" && activeSpaceId && activeSpace ? (
           <section className="page-stack">
             <section className="surface detail-hero">
               <div>
@@ -281,7 +333,14 @@ export function WorkspaceApp({ user, onLogout }: WorkspaceAppProps) {
                 </button>
               ))}
             </div>
-            {activeTab === "documents" ? <DocumentsTab space={activeSpace} onUpload={addDocument} /> : null}
+            {activeTab === "documents" ? (
+              <DocumentsTab
+                space={activeSpace}
+                onUpload={addDocument}
+                onDelete={handleDeleteDocument}
+                onReindex={handleReindexDocument}
+              />
+            ) : null}
             {activeTab === "chat" ? (
               <ChatTab
                 space={activeSpace}
@@ -298,7 +357,7 @@ export function WorkspaceApp({ user, onLogout }: WorkspaceAppProps) {
           </section>
         ) : null}
 
-        {route === "operations" ? (
+        {!loading && route === "operations" ? (
           <section className="page-stack">
             <MetricGrid
               items={[
@@ -347,7 +406,7 @@ export function WorkspaceApp({ user, onLogout }: WorkspaceAppProps) {
           </section>
         ) : null}
 
-        {route === "recent" ? (
+        {!loading && route === "recent" ? (
           <section className="page-stack">
             <section className="surface">
               <div className="section-header">
@@ -387,7 +446,17 @@ function MetricGrid({ items }: { items: Array<[string, string | number]> }) {
   );
 }
 
-function DocumentsTab({ space, onUpload }: { space: KnowledgeSpace; onUpload: (file: File) => void }) {
+function DocumentsTab({
+  space,
+  onUpload,
+  onDelete,
+  onReindex
+}: {
+  space: KnowledgeSpace;
+  onUpload: (file: File) => void;
+  onDelete: (documentId: number) => void;
+  onReindex: (documentId: number) => void;
+}) {
   return (
     <section className="surface">
       <div className="section-header">
@@ -427,12 +496,19 @@ function DocumentsTab({ space, onUpload }: { space: KnowledgeSpace; onUpload: (f
                 <td>{doc.updatedAt}</td>
                 <td>
                   <div className="document-actions">
-                    <button className="link-btn" type="button">重建</button>
-                    <button className="link-btn" type="button">删除</button>
+                    <button className="link-btn" type="button" onClick={() => onReindex(doc.id)}>重建</button>
+                    <button className="link-btn" type="button" onClick={() => onDelete(doc.id)}>删除</button>
                   </div>
                 </td>
               </tr>
             ))}
+            {!space.documents.length ? (
+              <tr>
+                <td colSpan={7}>
+                  <div className="citation-empty">暂无文档。</div>
+                </td>
+              </tr>
+            ) : null}
           </tbody>
         </table>
       </div>
