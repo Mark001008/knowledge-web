@@ -1,11 +1,16 @@
 import { type FormEvent, useEffect, useMemo, useState } from "react";
 import {
+  addSpaceMember,
   createChatSession,
   createKnowledgeSpace,
+  deleteKnowledgeSpace,
   deleteDocument,
+  loadKnowledgeSpace,
   loadWorkspace,
   reindexDocument,
+  removeSpaceMember,
   sendChatMessage,
+  updateKnowledgeSpace,
   uploadDocument
 } from "../../services/workspaceApi";
 import { statusClass, statusLabel } from "../../shared/status";
@@ -70,9 +75,9 @@ export function WorkspaceApp({ token, user, onLogout }: WorkspaceAppProps) {
     try {
       const nextSpaces = await loadWorkspace(token);
       setSpaces(nextSpaces);
-      if (!activeSpaceId && nextSpaces[0]) {
+      if (activeSpaceId && !nextSpaces.some((space) => space.id === activeSpaceId)) {
         setActiveSpaceId(null);
-        setActiveSessionId(nextSpaces[0].sessions[0]?.id || null);
+        setActiveSessionId(nextSpaces[0]?.sessions[0]?.id || null);
       }
     } catch (error) {
       setApiError(error instanceof TypeError ? "无法连接后端服务，请确认服务已启动" : (error as Error).message);
@@ -99,12 +104,98 @@ export function WorkspaceApp({ token, user, onLogout }: WorkspaceAppProps) {
     setSpaces((current) => current.map((space) => (space.id === activeSpace.id ? updater(space) : space)));
   }
 
+  function replaceSpace(nextSpace: KnowledgeSpace) {
+    setSpaces((current) => current.map((space) => (space.id === nextSpace.id ? nextSpace : space)));
+    setActiveSessionId(nextSpace.sessions[0]?.id || null);
+  }
+
   async function createSpace() {
     setApiError("");
     try {
       const nextSpace = await createKnowledgeSpace(token);
       setSpaces((current) => [nextSpace, ...current]);
       setAuditLogs((current) => [{ actor: displayName, action: "创建知识库", target: nextSpace.name, time: "刚刚" }, ...current]);
+    } catch (error) {
+      setApiError(error instanceof TypeError ? "无法连接后端服务，请确认服务已启动" : (error as Error).message);
+    }
+  }
+
+  async function refreshActiveSpace() {
+    if (!activeSpace) return;
+    setApiError("");
+    try {
+      const nextSpace = await loadKnowledgeSpace(token, activeSpace.id);
+      replaceSpace(nextSpace);
+    } catch (error) {
+      setApiError(error instanceof TypeError ? "无法连接后端服务，请确认服务已启动" : (error as Error).message);
+    }
+  }
+
+  async function updateSpaceSettings(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!activeSpace) return;
+    const data = new FormData(event.currentTarget);
+    setApiError("");
+    try {
+      const nextSpace = await updateKnowledgeSpace(token, activeSpace.id, {
+        name: data.get("name")?.toString().trim() || activeSpace.name,
+        description: data.get("description")?.toString().trim() || "",
+        visibility: data.get("visibility")?.toString() === "INTERNAL" ? "INTERNAL" : "PRIVATE",
+        topK: Number(data.get("topK") || activeSpace.topK),
+        similarityThreshold: Number(data.get("threshold") || activeSpace.threshold),
+        temperature: Number(data.get("temperature") || activeSpace.temperature)
+      });
+      replaceSpace(nextSpace);
+      setAuditLogs((current) => [{ actor: displayName, action: "更新知识库配置", target: nextSpace.name, time: "刚刚" }, ...current]);
+    } catch (error) {
+      setApiError(error instanceof TypeError ? "无法连接后端服务，请确认服务已启动" : (error as Error).message);
+    }
+  }
+
+  async function handleDeleteSpace() {
+    if (!activeSpace) return;
+    if (!window.confirm(`确认删除知识库「${activeSpace.name}」吗？`)) return;
+    setApiError("");
+    try {
+      await deleteKnowledgeSpace(token, activeSpace.id);
+      setAuditLogs((current) => [{ actor: displayName, action: "删除知识库", target: activeSpace.name, time: "刚刚" }, ...current]);
+      setSpaces((current) => current.filter((space) => space.id !== activeSpace.id));
+      setActiveSpaceId(null);
+      setActiveSessionId(null);
+    } catch (error) {
+      setApiError(error instanceof TypeError ? "无法连接后端服务，请确认服务已启动" : (error as Error).message);
+    }
+  }
+
+  async function addMember(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!activeSpace) return;
+    const form = event.currentTarget;
+    const data = new FormData(form);
+    const userId = Number(data.get("userId"));
+    const role = data.get("role")?.toString() || "READER";
+    if (!Number.isFinite(userId) || userId <= 0) {
+      setApiError("请输入有效的用户 ID");
+      return;
+    }
+    setApiError("");
+    try {
+      const nextSpace = await addSpaceMember(token, activeSpace.id, userId, role);
+      replaceSpace(nextSpace);
+      form.reset();
+      setAuditLogs((current) => [{ actor: displayName, action: `添加成员 ${userId}`, target: activeSpace.name, time: "刚刚" }, ...current]);
+    } catch (error) {
+      setApiError(error instanceof TypeError ? "无法连接后端服务，请确认服务已启动" : (error as Error).message);
+    }
+  }
+
+  async function removeMember(memberId: number) {
+    if (!activeSpace) return;
+    setApiError("");
+    try {
+      const nextSpace = await removeSpaceMember(token, activeSpace.id, memberId);
+      replaceSpace(nextSpace);
+      setAuditLogs((current) => [{ actor: displayName, action: `移除成员 ${memberId}`, target: activeSpace.name, time: "刚刚" }, ...current]);
     } catch (error) {
       setApiError(error instanceof TypeError ? "无法连接后端服务，请确认服务已启动" : (error as Error).message);
     }
@@ -339,6 +430,7 @@ export function WorkspaceApp({ token, user, onLogout }: WorkspaceAppProps) {
                 onUpload={addDocument}
                 onDelete={handleDeleteDocument}
                 onReindex={handleReindexDocument}
+                onRefresh={refreshActiveSpace}
               />
             ) : null}
             {activeTab === "chat" ? (
@@ -352,8 +444,8 @@ export function WorkspaceApp({ token, user, onLogout }: WorkspaceAppProps) {
                 citation={citation}
               />
             ) : null}
-            {activeTab === "members" ? <MembersTab space={activeSpace} /> : null}
-            {activeTab === "settings" ? <SettingsTab space={activeSpace} /> : null}
+            {activeTab === "members" ? <MembersTab space={activeSpace} onAddMember={addMember} onRemoveMember={removeMember} /> : null}
+            {activeTab === "settings" ? <SettingsTab space={activeSpace} onSubmit={updateSpaceSettings} onDelete={handleDeleteSpace} /> : null}
           </section>
         ) : null}
 
@@ -450,12 +542,14 @@ function DocumentsTab({
   space,
   onUpload,
   onDelete,
-  onReindex
+  onReindex,
+  onRefresh
 }: {
   space: KnowledgeSpace;
   onUpload: (file: File) => void;
   onDelete: (documentId: number) => void;
   onReindex: (documentId: number) => void;
+  onRefresh: () => void;
 }) {
   return (
     <section className="surface">
@@ -464,10 +558,15 @@ function DocumentsTab({
           <h3>文档</h3>
           <p>支持 PDF、TXT、Markdown，上传后异步解析和索引。</p>
         </div>
-        <label className="upload-btn">
-          上传文档
-          <input type="file" accept=".pdf,.txt,.md,.markdown" hidden onChange={(event) => event.target.files?.[0] && onUpload(event.target.files[0])} />
-        </label>
+        <div className="inline-actions">
+          <button className="secondary-btn" type="button" onClick={onRefresh}>
+            刷新状态
+          </button>
+          <label className="upload-btn">
+            上传文档
+            <input type="file" accept=".pdf,.txt,.md,.markdown" hidden onChange={(event) => event.target.files?.[0] && onUpload(event.target.files[0])} />
+          </label>
+        </div>
       </div>
       <div className="table-wrap">
         <table>
@@ -596,7 +695,15 @@ function ChatTab({
   );
 }
 
-function MembersTab({ space }: { space: KnowledgeSpace }) {
+function MembersTab({
+  space,
+  onAddMember,
+  onRemoveMember
+}: {
+  space: KnowledgeSpace;
+  onAddMember: (event: FormEvent<HTMLFormElement>) => void;
+  onRemoveMember: (memberId: number) => void;
+}) {
   return (
     <section className="surface">
       <div className="section-header">
@@ -604,8 +711,23 @@ function MembersTab({ space }: { space: KnowledgeSpace }) {
           <h3>成员权限</h3>
           <p>按知识库维度管理负责人、可问答用户和只读成员。</p>
         </div>
-        <button className="primary-btn" type="button">邀请成员</button>
       </div>
+      <form className="member-form" onSubmit={onAddMember}>
+        <label>
+          用户 ID
+          <input name="userId" type="number" min="1" placeholder="输入已存在用户 ID" />
+        </label>
+        <label>
+          角色
+          <select name="role" defaultValue="READER">
+            <option value="READER">只读用户</option>
+            <option value="ADMIN">知识库管理员</option>
+          </select>
+        </label>
+        <button className="primary-btn" type="submit">
+          添加成员
+        </button>
+      </form>
       <div className="member-grid">
         {space.members.map((member) => (
           <article className="member-card" key={member.id}>
@@ -615,7 +737,14 @@ function MembersTab({ space }: { space: KnowledgeSpace }) {
               <span>{member.role}</span>
             </div>
             <p>{member.scope}</p>
-            <span className="pill success">已启用</span>
+            <div className="member-actions">
+              <span className="pill success">已启用</span>
+              {member.role === "所有者" ? null : (
+                <button className="link-btn" type="button" onClick={() => onRemoveMember(member.id)}>
+                  移除
+                </button>
+              )}
+            </div>
           </article>
         ))}
       </div>
@@ -623,19 +752,45 @@ function MembersTab({ space }: { space: KnowledgeSpace }) {
   );
 }
 
-function SettingsTab({ space }: { space: KnowledgeSpace }) {
+function SettingsTab({
+  space,
+  onSubmit,
+  onDelete
+}: {
+  space: KnowledgeSpace;
+  onSubmit: (event: FormEvent<HTMLFormElement>) => void;
+  onDelete: () => void;
+}) {
   return (
     <section className="settings-layout">
       <section className="surface">
         <div className="section-header compact">
           <h3>检索策略</h3>
         </div>
-        <div className="settings-form">
-          <label>TopK<input type="number" min="1" max="20" defaultValue={space.topK} /></label>
-          <label>相似度阈值<input type="number" min="0" max="1" step="0.01" defaultValue={space.threshold} /></label>
-          <label>温度<input type="number" min="0" max="1" step="0.01" defaultValue={space.temperature} /></label>
-          <button className="primary-btn" type="button">保存配置</button>
-        </div>
+        <form className="settings-form" onSubmit={onSubmit}>
+          <label>
+            名称
+            <input name="name" defaultValue={space.name} />
+          </label>
+          <label>
+            描述
+            <input name="description" defaultValue={space.description} />
+          </label>
+          <label>
+            可见范围
+            <select name="visibility" defaultValue={space.visibility}>
+              <option value="PRIVATE">私有</option>
+              <option value="INTERNAL">企业内部</option>
+            </select>
+          </label>
+          <label>TopK<input name="topK" type="number" min="1" max="20" defaultValue={space.topK} /></label>
+          <label>相似度阈值<input name="threshold" type="number" min="0" max="1" step="0.01" defaultValue={space.threshold} /></label>
+          <label>温度<input name="temperature" type="number" min="0" max="1" step="0.01" defaultValue={space.temperature} /></label>
+          <div className="settings-actions">
+            <button className="primary-btn" type="submit">保存配置</button>
+            <button className="danger-btn" type="button" onClick={onDelete}>删除知识库</button>
+          </div>
+        </form>
       </section>
       <section className="surface">
         <div className="section-header compact">

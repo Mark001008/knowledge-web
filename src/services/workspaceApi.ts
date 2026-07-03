@@ -113,6 +113,11 @@ export async function loadWorkspace(token: string): Promise<KnowledgeSpace[]> {
   return Promise.all(spaces.map((space) => hydrateSpace(token, space)));
 }
 
+export async function loadKnowledgeSpace(token: string, spaceId: number) {
+  const space = await request<SpaceVO>(token, `/api/spaces/${spaceId}`);
+  return hydrateSpace(token, space);
+}
+
 export async function createKnowledgeSpace(token: string) {
   const timestamp = Date.now().toString().slice(-4);
   const space = await request<SpaceVO>(token, "/api/spaces", {
@@ -127,6 +132,46 @@ export async function createKnowledgeSpace(token: string) {
     })
   });
   return hydrateSpace(token, space);
+}
+
+export async function updateKnowledgeSpace(
+  token: string,
+  spaceId: number,
+  payload: {
+    name?: string;
+    description?: string;
+    visibility?: "PRIVATE" | "INTERNAL";
+    topK?: number;
+    similarityThreshold?: number;
+    temperature?: number;
+  }
+) {
+  const space = await request<SpaceVO>(token, `/api/spaces/${spaceId}`, {
+    method: "PUT",
+    body: JSON.stringify(payload)
+  });
+  return hydrateSpace(token, space);
+}
+
+export async function deleteKnowledgeSpace(token: string, spaceId: number) {
+  await request<void>(token, `/api/spaces/${spaceId}`, {
+    method: "DELETE"
+  });
+}
+
+export async function addSpaceMember(token: string, spaceId: number, userId: number, role: string) {
+  await request<void>(token, `/api/spaces/${spaceId}/members`, {
+    method: "POST",
+    body: JSON.stringify({ userId, role })
+  });
+  return loadKnowledgeSpace(token, spaceId);
+}
+
+export async function removeSpaceMember(token: string, spaceId: number, memberId: number) {
+  await request<void>(token, `/api/spaces/${spaceId}/members/${memberId}`, {
+    method: "DELETE"
+  });
+  return loadKnowledgeSpace(token, spaceId);
 }
 
 export async function uploadDocument(token: string, spaceId: number, file: File) {

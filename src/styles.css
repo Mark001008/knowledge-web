@@ -31,7 +31,8 @@ body {
 }
 
 button,
-input {
+input,
+select {
   font: inherit;
 }
 
@@ -938,7 +939,8 @@ label {
   font-weight: 600;
 }
 
-input {
+input,
+select {
   min-height: 40px;
   border: 1px solid var(--line);
   border-radius: 8px;
@@ -947,7 +949,8 @@ input {
   background: #fff;
 }
 
-input:focus {
+input:focus,
+select:focus {
   outline: 2px solid rgba(22, 110, 99, 0.18);
   border-color: var(--primary);
 }
@@ -962,7 +965,8 @@ input:focus {
 .secondary-btn,
 .ghost-btn,
 .upload-btn,
-.icon-btn {
+.icon-btn,
+.danger-btn {
   border: 1px solid transparent;
   border-radius: 8px;
   min-height: 38px;
@@ -989,6 +993,16 @@ input:focus {
   color: var(--text);
   background: #fff;
   border-color: var(--line);
+}
+
+.danger-btn {
+  color: var(--danger);
+  background: #fff;
+  border-color: #f4c7c2;
+}
+
+.danger-btn:hover {
+  background: #fff3f1;
 }
 
 .ghost-btn {
@@ -1495,6 +1509,14 @@ td {
   margin-top: 18px;
 }
 
+.member-form {
+  display: grid;
+  grid-template-columns: minmax(160px, 1fr) minmax(160px, 1fr) auto;
+  align-items: end;
+  gap: 12px;
+  margin-top: 18px;
+}
+
 .member-card {
   display: grid;
   grid-template-columns: 42px minmax(0, 1fr) auto;
@@ -1531,6 +1553,19 @@ td {
   grid-column: 1 / -1;
   margin: 0;
   color: var(--muted);
+}
+
+.member-actions,
+.settings-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.member-actions {
+  grid-column: 1 / -1;
+  justify-content: space-between;
 }
 
 .settings-form {
@@ -1839,6 +1874,7 @@ td {
   .metric-grid,
   .space-grid,
   .chat-layout,
+  .member-form,
   .member-grid {
     grid-template-columns: 1fr;
   }
