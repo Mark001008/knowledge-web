@@ -1,9 +1,16 @@
-import { type DragEvent, type FormEvent, useEffect, useMemo, useRef, useState } from "react";
+import { type DragEvent, type FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useEditor, EditorContent } from "@tiptap/react";
+import StarterKit from "@tiptap/starter-kit";
+import Placeholder from "@tiptap/extension-placeholder";
+import Underline from "@tiptap/extension-underline";
+import Link from "@tiptap/extension-link";
+import { marked } from "marked";
 import {
   addSpaceMember,
   createChatSession,
   createKnowledgeSpace,
   createOnlineDocument,
+  deleteChatSession,
   deleteDocument,
   deleteKnowledgeSpace,
   getDocumentContent,
@@ -12,6 +19,7 @@ import {
   reindexDocument,
   removeSpaceMember,
   sendChatMessage,
+  updateChatSession,
   updateDocumentContent,
   updateKnowledgeSpace,
   uploadDocument
@@ -84,73 +92,6 @@ type DocumentPageState =
   | ({
       mode: "edit";
     } & DocumentContentState);
-
-type EditorFormat =
-  | "bold"
-  | "italic"
-  | "underline"
-  | "strike"
-  | "bullet"
-  | "number"
-  | "quote"
-  | "divider"
-  | "link"
-  | "clear"
-  | "color"
-  | "highlight"
-  | "align-left"
-  | "align-center"
-  | "align-right"
-  | "indent"
-  | "outdent"
-  | "checklist";
-type EditorBlock = "p" | "h1" | "h2" | "h3";
-type EditorFont = "雅黑" | "宋体" | "黑体" | "等宽";
-type EditorSize = "小一" | "正文" | "大";
-
-interface ToolbarState {
-  block: EditorBlock;
-  bold: boolean;
-  italic: boolean;
-  underline: boolean;
-  strike: boolean;
-  bullet: boolean;
-  number: boolean;
-}
-
-const inlineCommands: Array<{ format: EditorFormat; label: string; title: string; activeKey?: keyof ToolbarState }> = [
-  { format: "bold", label: "B", title: "加粗", activeKey: "bold" },
-  { format: "italic", label: "I", title: "斜体", activeKey: "italic" },
-  { format: "strike", label: "S", title: "删除线", activeKey: "strike" },
-  { format: "underline", label: "U", title: "下划线", activeKey: "underline" }
-];
-
-const structureCommands: Array<{ format: EditorFormat; label: string; title: string; activeKey?: keyof ToolbarState }> = [
-  { format: "bullet", label: "•", title: "项目列表", activeKey: "bullet" },
-  { format: "number", label: "1.", title: "编号列表", activeKey: "number" },
-  { format: "outdent", label: "←", title: "减少缩进" },
-  { format: "indent", label: "→", title: "增加缩进" }
-];
-
-const insertCommands: Array<{ format: EditorFormat; label: string; title: string }> = [
-  { format: "checklist", label: "☑", title: "待办事项" },
-  { format: "link", label: "链接", title: "插入链接" },
-  { format: "quote", label: "“”", title: "引用" },
-  { format: "divider", label: "—", title: "分割线" }
-];
-
-const editorFonts: Record<EditorFont, string> = {
-  雅黑: "Microsoft YaHei, PingFang SC, sans-serif",
-  宋体: "SimSun, Songti SC, serif",
-  黑体: "SimHei, Heiti SC, sans-serif",
-  等宽: "Menlo, Consolas, monospace"
-};
-
-const editorSizes: Record<EditorSize, string> = {
-  小一: "5",
-  正文: "4",
-  大: "6"
-};
 
 export function WorkspaceApp({ token, user, permissions, menus, onLogout }: WorkspaceAppProps) {
   const [route, setRoute] = useState<RouteKey>("spaces");
@@ -356,6 +297,41 @@ export function WorkspaceApp({ token, user, permissions, menus, onLogout }: Work
     }
   }
 
+  async function renameSession(sessionId: number, newTitle: string) {
+    if (!activeSpace) return;
+    setApiError("");
+    try {
+      await updateChatSession(token, sessionId, newTitle);
+      updateActiveSpace((space) => ({
+        ...space,
+        sessions: space.sessions.map((item) =>
+          item.id === sessionId ? { ...item, title: newTitle } : item
+        )
+      }));
+    } catch (error) {
+      setApiError(errorMessage(error));
+    }
+  }
+
+  async function removeSession(sessionId: number) {
+    if (!activeSpace) return;
+    if (!window.confirm("确定删除这个会话吗？")) return;
+    setApiError("");
+    try {
+      await deleteChatSession(token, sessionId);
+      updateActiveSpace((space) => ({
+        ...space,
+        sessions: space.sessions.filter((item) => item.id !== sessionId)
+      }));
+      if (activeSessionId === sessionId) {
+        setActiveSessionId(null);
+      }
+      setCitation(null);
+    } catch (error) {
+      setApiError(errorMessage(error));
+    }
+  }
+
   async function sendQuestion(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (isBusy("send-question")) return;
@@ -504,7 +480,7 @@ export function WorkspaceApp({ token, user, permissions, menus, onLogout }: Work
       <header className="app-header">
         <div className="app-brand">
           <span className="brand-mark">KB</span>
-          <span>知识库工作台</span>
+          <span>MarkVerse</span>
         </div>
         <nav className="nav-list" aria-label="主导航">
           {menus.map((menu) => (
@@ -539,7 +515,7 @@ export function WorkspaceApp({ token, user, permissions, menus, onLogout }: Work
         {!editingDocument ? (
         <header className="topbar">
           <div>
-            <p className="eyebrow">企业知识库</p>
+            <p className="eyebrow">MarkVerse</p>
             <h2>{title}</h2>
           </div>
           {activeSpace ? (
@@ -601,6 +577,8 @@ export function WorkspaceApp({ token, user, permissions, menus, onLogout }: Work
             onRefresh={refreshActiveSpace}
             onSelectSession={setActiveSessionId}
             onCreateSession={createSession}
+            onRenameSession={renameSession}
+            onDeleteSession={removeSession}
             onSubmitQuestion={sendQuestion}
             onSelectCitation={setCitation}
             onAddMember={addMember}
@@ -747,12 +725,35 @@ function WorkspaceHome({
             <p>只展示当前账号有权限访问的知识库。</p>
           </div>
           <div className="inline-actions">
-            <input className="search-input" placeholder="搜索知识库" value={keyword} onChange={(event) => onKeywordChange(event.target.value)} />
+            <div className="search-wrapper">
+              <span className="search-icon">🔍</span>
+              <input
+                className="search-input"
+                placeholder="搜索知识库名称或描述..."
+                value={keyword}
+                onChange={(event) => onKeywordChange(event.target.value)}
+              />
+              {keyword && (
+                <button
+                  className="search-clear"
+                  type="button"
+                  onClick={() => onKeywordChange("")}
+                  title="清除搜索"
+                >
+                  ✕
+                </button>
+              )}
+            </div>
             <button className="primary-btn" type="button" onClick={onCreateSpace} disabled={creating}>
               {creating ? "创建中" : "创建知识库"}
             </button>
           </div>
         </div>
+        {keyword && (
+          <div className="search-result-info">
+            找到 {spaces.length} 个匹配的知识库
+          </div>
+        )}
         <div className="space-grid">
           {spaces.map((space) => (
             <article className="space-card" key={space.id}>
@@ -800,6 +801,8 @@ function SpaceDetail({
   onRefresh,
   onSelectSession,
   onCreateSession,
+  onRenameSession,
+  onDeleteSession,
   onSubmitQuestion,
   onSelectCitation,
   onAddMember,
@@ -823,6 +826,8 @@ function SpaceDetail({
   onRefresh: () => void;
   onSelectSession: (sessionId: number) => void;
   onCreateSession: () => void;
+  onRenameSession: (sessionId: number, newTitle: string) => void;
+  onDeleteSession: (sessionId: number) => void;
   onSubmitQuestion: (event: FormEvent<HTMLFormElement>) => void;
   onSelectCitation: (citation: Citation) => void;
   onAddMember: (event: FormEvent<HTMLFormElement>) => void;
@@ -884,6 +889,8 @@ function SpaceDetail({
           sending={busyActions.has("send-question")}
           onSelectSession={onSelectSession}
           onCreateSession={onCreateSession}
+          onRenameSession={onRenameSession}
+          onDeleteSession={onDeleteSession}
           onSubmitQuestion={onSubmitQuestion}
           onSelectCitation={onSelectCitation}
           citation={citation}
@@ -998,8 +1005,14 @@ function DocumentsTab({
   onReindex: (documentId: number) => void;
   onRefresh: () => void;
 }) {
-  // 权限检查函数
+  const [docKeyword, setDocKeyword] = useState("");
   const hasPermission = (code: string) => permissions.includes(code);
+
+  const filteredDocs = space.documents.filter((doc) => {
+    const query = docKeyword.trim().toLowerCase();
+    return !query || doc.fileName.toLowerCase().includes(query) || doc.uploadedBy.toLowerCase().includes(query);
+  });
+
   return (
     <section className="surface">
       <div className="section-header">
@@ -1020,6 +1033,28 @@ function DocumentsTab({
           </button>
         )}
       </div>
+      <div className="doc-search-bar">
+        <div className="search-wrapper">
+          <span className="search-icon">🔍</span>
+          <input
+            className="search-input"
+            placeholder="搜索文档名称或上传人..."
+            value={docKeyword}
+            onChange={(event) => setDocKeyword(event.target.value)}
+          />
+          {docKeyword && (
+            <button
+              className="search-clear"
+              type="button"
+              onClick={() => setDocKeyword("")}
+              title="清除搜索"
+            >
+              ✕
+            </button>
+          )}
+        </div>
+        <span className="doc-count">{filteredDocs.length} / {space.documents.length} 个文档</span>
+      </div>
       <div className="table-wrap">
         <table>
           <thead>
@@ -1034,7 +1069,7 @@ function DocumentsTab({
             </tr>
           </thead>
           <tbody>
-            {space.documents.map((doc) => {
+            {filteredDocs.map((doc) => {
               const deleting = busyActions.has(`delete-document-${doc.id}`);
               const reindexing = busyActions.has(`reindex-document-${doc.id}`);
               const editing = busyActions.has(`edit-document-${doc.id}`);
@@ -1080,6 +1115,12 @@ function DocumentsTab({
               <tr>
                 <td colSpan={7}>
                   <EmptyState title="暂无文档" text="把制度、手册、方案或 FAQ 上传到这里，后续即可围绕资料提问。" compact />
+                </td>
+              </tr>
+            ) : !filteredDocs.length ? (
+              <tr>
+                <td colSpan={7}>
+                  <EmptyState title="没有匹配的文档" text={`未找到与"${docKeyword}"匹配的文档，请尝试其他关键词。`} compact />
                 </td>
               </tr>
             ) : null}
@@ -1153,6 +1194,20 @@ function DocumentReadPage({
   onEdit: () => void;
   onBack: () => void;
 }) {
+  // 将内容转换为 HTML
+  const htmlContent = useMemo(() => {
+    const content = page.content || "";
+    if (!content) return "";
+
+    // 如果已经是 HTML，直接返回
+    if (content.trimStart().startsWith("<")) {
+      return content;
+    }
+
+    // 否则当作 Markdown 转换
+    return markdownToHtml(content);
+  }, [page.content]);
+
   return (
     <section className="page-stack document-page">
       <section className="surface document-page-head">
@@ -1176,10 +1231,34 @@ function DocumentReadPage({
         </div>
       </section>
       <section className={`surface document-render ${page.fileType.toLowerCase()}`}>
-        {page.fileType === "MARKDOWN" ? <MarkdownRender content={page.content} /> : <pre>{page.content || "暂无可预览内容。"}</pre>}
+        {page.fileType === "MARKDOWN" ? (
+          <div
+            className="tiptap-content"
+            dangerouslySetInnerHTML={{ __html: htmlContent }}
+          />
+        ) : (
+          <pre>{page.content || "暂无可预览内容。"}</pre>
+        )}
       </section>
     </section>
   );
+}
+
+function isMarkdown(text: string): boolean {
+  // 检测是否是 Markdown 格式（不是以 < 开头的 HTML）
+  const trimmed = text.trim();
+  if (!trimmed) return false;
+  if (trimmed.startsWith("<")) return false;
+  // 检测常见 Markdown 语法
+  return /^#{1,6}\s|^[-*]\s|^>\s|^```|^\d+\.\s|\*\*[^*]+\*\*|__[^_]+__/.test(trimmed);
+}
+
+function markdownToHtml(md: string): string {
+  try {
+    return marked.parse(md, { breaks: true }) as string;
+  } catch {
+    return md;
+  }
 }
 
 function DocumentEditPage({
@@ -1195,246 +1274,236 @@ function DocumentEditPage({
   onSubmit: (event: FormEvent<HTMLFormElement>) => void;
   onBack: () => void;
 }) {
-  const editorRef = useRef<HTMLDivElement | null>(null);
-  const [toolbarState, setToolbarState] = useState<ToolbarState>({
-    block: "p",
-    bold: false,
-    italic: false,
-    underline: false,
-    strike: false,
-    bullet: false,
-    number: false
-  });
-  const outlineItems = useMemo(() => extractOutline(page.content), [page.content]);
+  // 将内容转换为 HTML
+  const initialContent = useMemo(() => {
+    const content = page.content || "";
+    if (!content) return "<p></p>";
 
-  function updateContent(content: string) {
-    onChange({ ...page, content });
-  }
-
-  useEffect(() => {
-    if (editorRef.current) {
-      editorRef.current.innerHTML = markdownToEditableHtml(page.content);
-      document.execCommand("defaultParagraphSeparator", false, "p");
-      updateToolbarState();
+    // 如果已经是 HTML（以 < 开头），直接返回
+    if (content.trimStart().startsWith("<")) {
+      return content;
     }
-  }, [page.mode, "documentId" in page ? page.documentId : "new"]);
 
-  function syncEditorContent() {
-    if (!editorRef.current) return;
-    updateContent(editableHtmlToMarkdown(editorRef.current));
-    updateToolbarState();
-  }
+    // 否则当作 Markdown 转换
+    return markdownToHtml(content);
+  }, [page.content]);
 
-  function runEditorCommand(callback: () => void) {
-    const editor = editorRef.current;
-    if (!editor) return;
-    editor.focus();
-    callback();
-    window.requestAnimationFrame(() => {
-      syncEditorContent();
-      updateToolbarState();
-    });
-  }
+  const editor = useEditor({
+    extensions: [
+      StarterKit.configure({
+        heading: { levels: [1, 2, 3] },
+      }),
+      Placeholder.configure({
+        placeholder: "开始输入文档内容...",
+      }),
+      Underline,
+      Link.configure({
+        openOnClick: false,
+      }),
+    ],
+    content: initialContent,
+    onUpdate: ({ editor }) => {
+      onChange({ ...page, content: editor.getHTML() });
+    },
+    editorProps: {
+      attributes: {
+        class: "tiptap-editor-content",
+      },
+    },
+  });
 
-  function applyBlock(block: EditorBlock) {
-    runEditorCommand(() => document.execCommand("formatBlock", false, block));
-  }
+  // 当内容从外部更新时，同步到编辑器
+  useEffect(() => {
+    if (editor && page.content) {
+      const currentContent = editor.getHTML();
+      const newContent = page.content.trimStart().startsWith("<")
+        ? page.content
+        : markdownToHtml(page.content);
 
-  function applyFont(font: EditorFont) {
-    runEditorCommand(() => document.execCommand("fontName", false, editorFonts[font]));
-  }
-
-  function applySize(size: EditorSize) {
-    runEditorCommand(() => document.execCommand("fontSize", false, editorSizes[size]));
-  }
-
-  function applyFormat(format: EditorFormat) {
-    runEditorCommand(() => {
-      if (format === "bold") document.execCommand("bold");
-      if (format === "italic") document.execCommand("italic");
-      if (format === "underline") document.execCommand("underline");
-      if (format === "strike") document.execCommand("strikeThrough");
-      if (format === "bullet") document.execCommand("insertUnorderedList");
-      if (format === "number") document.execCommand("insertOrderedList");
-      if (format === "quote") document.execCommand("formatBlock", false, "blockquote");
-      if (format === "divider") document.execCommand("insertHorizontalRule");
-      if (format === "color") document.execCommand("foreColor", false, "#d92d20");
-      if (format === "highlight") document.execCommand("hiliteColor", false, "#fff1a8");
-      if (format === "align-left") document.execCommand("justifyLeft");
-      if (format === "align-center") document.execCommand("justifyCenter");
-      if (format === "align-right") document.execCommand("justifyRight");
-      if (format === "indent") document.execCommand("indent");
-      if (format === "outdent") document.execCommand("outdent");
-      if (format === "checklist") document.execCommand("insertHTML", false, "<p>☐ 待办事项</p>");
-      if (format === "link") {
-        const url = window.prompt("请输入链接地址");
-        if (url?.trim()) document.execCommand("createLink", false, url.trim());
+      // 只在内容真正变化时更新，避免循环
+      if (currentContent !== newContent) {
+        editor.commands.setContent(newContent);
       }
-      if (format === "clear") document.execCommand("removeFormat");
-    });
-  }
-
-  function updateToolbarState() {
-    const selection = window.getSelection();
-    const block = selection?.anchorNode ? findActiveBlock(selection.anchorNode) : "p";
-    setToolbarState({
-      block,
-      bold: document.queryCommandState("bold"),
-      italic: document.queryCommandState("italic"),
-      underline: document.queryCommandState("underline"),
-      strike: document.queryCommandState("strikeThrough"),
-      bullet: document.queryCommandState("insertUnorderedList"),
-      number: document.queryCommandState("insertOrderedList")
-    });
-  }
+    }
+  }, [page.content]);
 
   return (
     <form className="document-edit-shell" onSubmit={onSubmit}>
-      <header className="document-edit-toolbar" aria-label="编辑工具栏">
-        <div className="toolbar-group">
-          <button className="toolbar-menu-button" type="button" title="菜单" onClick={onBack} disabled={saving}>
-            <span className="menu-circle">☰</span>
-            菜单
-            <span className="toolbar-caret" />
-          </button>
-        </div>
-        <div className="toolbar-group muted">
-          <button className="toolbar-icon" type="button" title="撤销" onClick={() => runEditorCommand(() => document.execCommand("undo"))} disabled={saving}>↶</button>
-          <button className="toolbar-icon" type="button" title="重做" onClick={() => runEditorCommand(() => document.execCommand("redo"))} disabled={saving}>↷</button>
-          <button className="toolbar-icon" type="button" title="清除格式" onClick={() => applyFormat("clear")} disabled={saving}>⌫</button>
-        </div>
-        <div className="toolbar-group">
-          <button
-            className="toolbar-insert-button"
-            type="button"
-            title="插入"
-            onClick={() => runEditorCommand(() => document.execCommand("insertHTML", false, "<p><br></p>"))}
-            disabled={saving}
-          >
-            ⊕ 插入
-            <span className="toolbar-caret" />
-          </button>
-        </div>
-        <div className="toolbar-group">
-          <select className="toolbar-select" value={toolbarState.block} onChange={(event) => applyBlock(event.target.value as EditorBlock)} disabled={saving} title="段落样式">
-            <option value="p">正文</option>
-            <option value="h1">标题</option>
-            <option value="h2">标题2</option>
-            <option value="h3">标题3</option>
-          </select>
-          <select className="toolbar-select font-select" defaultValue="雅黑" onChange={(event) => applyFont(event.target.value as EditorFont)} disabled={saving} title="字体">
-            <option value="雅黑">雅黑</option>
-            <option value="宋体">宋体</option>
-            <option value="黑体">黑体</option>
-            <option value="等宽">等宽</option>
-          </select>
-          <select className="toolbar-select size-select" defaultValue="正文" onChange={(event) => applySize(event.target.value as EditorSize)} disabled={saving} title="字号">
-            <option value="小一">小一</option>
-            <option value="正文">正文</option>
-            <option value="大">大</option>
-          </select>
-        </div>
-        <div className="toolbar-group">
-          <button className="editor-command" type="button" title="增大字号" onClick={() => applySize("大")} disabled={saving}>A<sup>+</sup></button>
-          <button className="editor-command" type="button" title="减小字号" onClick={() => applySize("小一")} disabled={saving}>A<sup>-</sup></button>
-          {inlineCommands.map((command) => (
-            <button
-              className={`editor-command ${command.activeKey && toolbarState[command.activeKey] ? "active" : ""}`}
-              type="button"
-              key={command.format}
-              onClick={() => applyFormat(command.format)}
-              disabled={saving}
-              title={command.title}
-            >
-              {command.label}
-            </button>
-          ))}
-          <button className="editor-command with-caret" type="button" title="文字颜色" onClick={() => applyFormat("color")} disabled={saving}>
-            <span className="color-command">A</span>
-          </button>
-          <button className="editor-command with-caret" type="button" title="高亮" onClick={() => applyFormat("highlight")} disabled={saving}>
-            <span className="highlight-command">▰</span>
-          </button>
-          <button className="editor-command" type="button" title="更多" onClick={() => applyFormat("clear")} disabled={saving}>··· 更多</button>
-        </div>
-        <div className="toolbar-group">
-          <button className="editor-command with-caret" type="button" title="左对齐" onClick={() => applyFormat("align-left")} disabled={saving}>☰</button>
-        </div>
-        <div className="toolbar-group">
-          {structureCommands.map((command) => (
-            <button
-              className={`editor-command ${command.activeKey && toolbarState[command.activeKey] ? "active" : ""}`}
-              type="button"
-              key={command.format}
-              onClick={() => applyFormat(command.format)}
-              disabled={saving}
-              title={command.title}
-            >
-              {command.label}
-            </button>
-          ))}
-        </div>
-        <div className="toolbar-group">
-          {insertCommands.map((command) => (
-            <button
-              className="editor-command"
-              type="button"
-              key={command.format}
-              onClick={() => applyFormat(command.format)}
-              disabled={saving}
-              title={command.title}
-            >
-              {command.label}
-            </button>
-          ))}
-        </div>
-        <div className="toolbar-spacer" />
-        <div className="toolbar-group">
-          <button className="secondary-btn compact-btn" type="button" onClick={onBack} disabled={saving}>
-            返回
-          </button>
-          <button className="primary-btn compact-btn" type="submit" disabled={saving || !page.title.trim() || !page.content.trim()}>
-            {saving ? "保存中" : "保存"}
-          </button>
-        </div>
-      </header>
-      <section className="document-edit-stage">
-        <main className="document-paper">
-          <button className="document-icon-placeholder" type="button" disabled={saving}>
-            添加图标
-          </button>
+      <div className="document-topbar">
+        <div className="topbar-spacer" />
+        <div className="topbar-center">
           <input
-            className="document-title-input"
+            className="topbar-title-input"
             value={page.title}
             onChange={(event) => onChange({ ...page, title: event.target.value })}
-            placeholder="未命名"
+            placeholder="未命名文档"
             disabled={saving}
           />
-          <div
-            ref={editorRef}
-            className="editor-canvas markdown-render"
-            contentEditable={!saving}
-            suppressContentEditableWarning
-            onInput={syncEditorContent}
-            onBlur={syncEditorContent}
-            onKeyUp={updateToolbarState}
-            onMouseUp={updateToolbarState}
-            data-placeholder="输入正文，或使用上方工具栏插入标题、列表、引用。"
-          />
-        </main>
-        <aside className="document-outline" aria-label="文档大纲">
-          <strong>大纲</strong>
-          <div className="outline-list">
-            {outlineItems.map((item, index) => (
-              <span className={`outline-item level-${item.level}`} key={`${item.text}-${index}`}>
-                {item.text}
-              </span>
-            ))}
-            {!outlineItems.length ? <span className="outline-empty">暂无标题</span> : null}
-          </div>
-        </aside>
-      </section>
+        </div>
+        <div className="topbar-actions">
+          <button className="topbar-back-btn" type="button" onClick={onBack} disabled={saving}>
+            ← 返回
+          </button>
+          <button className="topbar-save-btn" type="submit" disabled={saving || !page.title.trim() || !page.content.trim()}>
+            {saving ? "保存中..." : "保存"}
+          </button>
+        </div>
+      </div>
+      <div className="tiptap-toolbar">
+        <ToolbarGroup>
+          <ToolbarButton
+            onClick={() => editor?.chain().focus().toggleBold().run()}
+            active={editor?.isActive("bold")}
+            title="加粗"
+          >
+            <strong>B</strong>
+          </ToolbarButton>
+          <ToolbarButton
+            onClick={() => editor?.chain().focus().toggleItalic().run()}
+            active={editor?.isActive("italic")}
+            title="斜体"
+          >
+            <em>I</em>
+          </ToolbarButton>
+          <ToolbarButton
+            onClick={() => editor?.chain().focus().toggleUnderline().run()}
+            active={editor?.isActive("underline")}
+            title="下划线"
+          >
+            <u>U</u>
+          </ToolbarButton>
+          <ToolbarButton
+            onClick={() => editor?.chain().focus().toggleStrike().run()}
+            active={editor?.isActive("strike")}
+            title="删除线"
+          >
+            <s>S</s>
+          </ToolbarButton>
+        </ToolbarGroup>
+        <ToolbarGroup>
+          <ToolbarButton
+            onClick={() => editor?.chain().focus().toggleHeading({ level: 1 }).run()}
+            active={editor?.isActive("heading", { level: 1 })}
+            title="标题1"
+          >
+            H1
+          </ToolbarButton>
+          <ToolbarButton
+            onClick={() => editor?.chain().focus().toggleHeading({ level: 2 }).run()}
+            active={editor?.isActive("heading", { level: 2 })}
+            title="标题2"
+          >
+            H2
+          </ToolbarButton>
+          <ToolbarButton
+            onClick={() => editor?.chain().focus().toggleHeading({ level: 3 }).run()}
+            active={editor?.isActive("heading", { level: 3 })}
+            title="标题3"
+          >
+            H3
+          </ToolbarButton>
+        </ToolbarGroup>
+        <ToolbarGroup>
+          <ToolbarButton
+            onClick={() => editor?.chain().focus().toggleBulletList().run()}
+            active={editor?.isActive("bulletList")}
+            title="无序列表"
+          >
+            •
+          </ToolbarButton>
+          <ToolbarButton
+            onClick={() => editor?.chain().focus().toggleOrderedList().run()}
+            active={editor?.isActive("orderedList")}
+            title="有序列表"
+          >
+            1.
+          </ToolbarButton>
+          <ToolbarButton
+            onClick={() => editor?.chain().focus().toggleBlockquote().run()}
+            active={editor?.isActive("blockquote")}
+            title="引用"
+          >
+            ❝
+          </ToolbarButton>
+          <ToolbarButton
+            onClick={() => editor?.chain().focus().toggleCodeBlock().run()}
+            active={editor?.isActive("codeBlock")}
+            title="代码块"
+          >
+            {'</>'}
+          </ToolbarButton>
+        </ToolbarGroup>
+        <ToolbarGroup>
+          <ToolbarButton
+            onClick={() => editor?.chain().focus().setHorizontalRule().run()}
+            title="分割线"
+          >
+            —
+          </ToolbarButton>
+          <ToolbarButton
+            onClick={() => {
+              const url = window.prompt("输入链接地址:");
+              if (url) {
+                editor?.chain().focus().setLink({ href: url }).run();
+              }
+            }}
+            active={editor?.isActive("link")}
+            title="链接"
+          >
+            🔗
+          </ToolbarButton>
+        </ToolbarGroup>
+        <ToolbarGroup>
+          <ToolbarButton
+            onClick={() => editor?.chain().focus().undo().run()}
+            disabled={!editor?.can().undo()}
+            title="撤销"
+          >
+            ↶
+          </ToolbarButton>
+          <ToolbarButton
+            onClick={() => editor?.chain().focus().redo().run()}
+            disabled={!editor?.can().redo()}
+            title="重做"
+          >
+            ↷
+          </ToolbarButton>
+        </ToolbarGroup>
+      </div>
+      <div className="tiptap-wrapper">
+        <EditorContent editor={editor} />
+      </div>
     </form>
+  );
+}
+
+function ToolbarGroup({ children }: { children: React.ReactNode }) {
+  return <div className="toolbar-group">{children}</div>;
+}
+
+function ToolbarButton({
+  children,
+  onClick,
+  active,
+  disabled,
+  title
+}: {
+  children: React.ReactNode;
+  onClick: () => void;
+  active?: boolean;
+  disabled?: boolean;
+  title?: string;
+}) {
+  return (
+    <button
+      type="button"
+      className={`toolbar-btn ${active ? "active" : ""}`}
+      onClick={onClick}
+      disabled={disabled}
+      title={title}
+    >
+      {children}
+    </button>
   );
 }
 
@@ -1487,19 +1556,51 @@ function renderMarkdownBlock(block: string, index: number) {
 }
 
 function renderInlineMarkdown(text: string) {
-  const parts = text.split(/(\*\*[^*]+\*\*)/g);
-  return parts.map((part, index) => {
-    if (part.startsWith("**") && part.endsWith("**")) {
-      return <strong key={index}>{part.slice(2, -2)}</strong>;
-    }
-    return <span key={index}>{part}</span>;
-  });
-}
+  // 支持更多行内格式：加粗、斜体、行内代码、删除线、链接
+  const regex = /(\*\*[^*]+\*\*|\*[^*]+\*|`[^`]+`|~~[^~]+~~|\[([^\]]+)\]\(([^)]+)\))/g;
+  const parts: React.ReactNode[] = [];
+  let lastIndex = 0;
+  let match;
 
-function markdownToEditableHtml(content: string) {
-  const blocks = content.split(/\n{2,}/).map((block) => block.trim()).filter(Boolean);
-  if (!blocks.length) return "";
-  return blocks.map(markdownBlockToHtml).join("");
+  while ((match = regex.exec(text)) !== null) {
+    // 添加匹配前的文本
+    if (match.index > lastIndex) {
+      parts.push(<span key={`text-${lastIndex}`}>{text.slice(lastIndex, match.index)}</span>);
+    }
+
+    const matched = match[0];
+    const key = `format-${match.index}`;
+
+    if (matched.startsWith("**") && matched.endsWith("**")) {
+      // 加粗
+      parts.push(<strong key={key}>{matched.slice(2, -2)}</strong>);
+    } else if (matched.startsWith("*") && matched.endsWith("*") && !matched.startsWith("**")) {
+      // 斜体
+      parts.push(<em key={key}>{matched.slice(1, -1)}</em>);
+    } else if (matched.startsWith("`") && matched.endsWith("`")) {
+      // 行内代码
+      parts.push(<code key={key} className="inline-code">{matched.slice(1, -1)}</code>);
+    } else if (matched.startsWith("~~") && matched.endsWith("~~")) {
+      // 删除线
+      parts.push(<del key={key}>{matched.slice(2, -2)}</del>);
+    } else if (matched.startsWith("[") && matched.includes("](")) {
+      // 链接 [text](url)
+      const linkText = match[2];
+      const linkUrl = match[3];
+      parts.push(<a key={key} href={linkUrl} target="_blank" rel="noopener noreferrer">{linkText}</a>);
+    } else {
+      parts.push(<span key={key}>{matched}</span>);
+    }
+
+    lastIndex = match.index + matched.length;
+  }
+
+  // 添加剩余文本
+  if (lastIndex < text.length) {
+    parts.push(<span key={`text-end`}>{text.slice(lastIndex)}</span>);
+  }
+
+  return parts.length > 0 ? parts : <span>{text}</span>;
 }
 
 function extractOutline(content: string) {
@@ -1512,107 +1613,6 @@ function extractOutline(content: string) {
     .filter((item): item is { level: number; text: string } => Boolean(item));
 }
 
-function findActiveBlock(node: Node): EditorBlock {
-  let current: Node | null = node.nodeType === Node.TEXT_NODE ? node.parentNode : node;
-  while (current && current instanceof HTMLElement) {
-    const tag = current.tagName.toLowerCase();
-    if (tag === "h1" || tag === "h2" || tag === "h3") return tag;
-    if (tag === "p" || tag === "li" || tag === "blockquote" || tag === "pre" || tag === "div") return "p";
-    current = current.parentNode;
-  }
-  return "p";
-}
-
-function markdownBlockToHtml(block: string) {
-  if (block === "---") {
-    return "<hr>";
-  }
-  if (block.startsWith("### ")) {
-    return `<h3>${inlineMarkdownToHtml(block.slice(4))}</h3>`;
-  }
-  if (block.startsWith("## ")) {
-    return `<h2>${inlineMarkdownToHtml(block.slice(3))}</h2>`;
-  }
-  if (block.startsWith("# ")) {
-    return `<h1>${inlineMarkdownToHtml(block.slice(2))}</h1>`;
-  }
-  if (block.startsWith("> ")) {
-    return `<blockquote>${inlineMarkdownToHtml(block.replace(/^>\s?/gm, ""))}</blockquote>`;
-  }
-  if (block.startsWith("```")) {
-    return `<pre>${escapeHtml(block.replace(/^```[a-zA-Z0-9_-]*\n?/, "").replace(/```$/, ""))}</pre>`;
-  }
-  const lines = block.split("\n");
-  if (lines.every((line) => /^[-*]\s+/.test(line.trim()))) {
-    return `<ul>${lines.map((line) => `<li>${inlineMarkdownToHtml(line.trim().replace(/^[-*]\s+/, ""))}</li>`).join("")}</ul>`;
-  }
-  if (lines.every((line) => /^\d+\.\s+/.test(line.trim()))) {
-    return `<ol>${lines.map((line) => `<li>${inlineMarkdownToHtml(line.trim().replace(/^\d+\.\s+/, ""))}</li>`).join("")}</ol>`;
-  }
-  return `<p>${inlineMarkdownToHtml(lines.join("\n"))}</p>`;
-}
-
-function inlineMarkdownToHtml(text: string) {
-  return escapeHtml(text).replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>").replace(/\n/g, "<br>");
-}
-
-function editableHtmlToMarkdown(root: HTMLElement) {
-  return Array.from(root.childNodes)
-    .map(nodeToMarkdown)
-    .filter(Boolean)
-    .join("\n\n")
-    .trim();
-}
-
-function nodeToMarkdown(node: ChildNode): string {
-  if (node.nodeType === Node.TEXT_NODE) {
-    return node.textContent?.trim() || "";
-  }
-  if (!(node instanceof HTMLElement)) {
-    return "";
-  }
-  const tag = node.tagName.toLowerCase();
-  if (tag === "h1") return `# ${inlineHtmlToMarkdown(node)}`;
-  if (tag === "h2") return `## ${inlineHtmlToMarkdown(node)}`;
-  if (tag === "h3") return `### ${inlineHtmlToMarkdown(node)}`;
-  if (tag === "blockquote") return inlineHtmlToMarkdown(node).split("\n").map((line: string) => `> ${line}`).join("\n");
-  if (tag === "pre") return `\`\`\`\n${node.textContent?.trim() || ""}\n\`\`\``;
-  if (tag === "hr") return "---";
-  if (tag === "ul") {
-    return Array.from(node.children).map((child) => `- ${inlineHtmlToMarkdown(child as HTMLElement)}`).join("\n");
-  }
-  if (tag === "ol") {
-    return Array.from(node.children).map((child, index) => `${index + 1}. ${inlineHtmlToMarkdown(child as HTMLElement)}`).join("\n");
-  }
-  if (tag === "div" && !node.textContent?.trim()) return "";
-  return inlineHtmlToMarkdown(node);
-}
-
-function inlineHtmlToMarkdown(element: HTMLElement): string {
-  return Array.from(element.childNodes)
-    .map((node): string => {
-      if (node.nodeType === Node.TEXT_NODE) return node.textContent || "";
-      if (!(node instanceof HTMLElement)) return "";
-      const tag = node.tagName.toLowerCase();
-      if (tag === "strong" || tag === "b") return `**${node.textContent || ""}**`;
-      if (tag === "br") return "\n";
-      if (tag === "div") return `\n${inlineHtmlToMarkdown(node)}`;
-      return inlineHtmlToMarkdown(node);
-    })
-    .join("")
-    .replace(/\n{3,}/g, "\n\n")
-    .trim();
-}
-
-function escapeHtml(text: string) {
-  return text
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&#039;");
-}
-
 function ChatTab({
   space,
   activeSessionId,
@@ -1620,6 +1620,8 @@ function ChatTab({
   sending,
   onSelectSession,
   onCreateSession,
+  onRenameSession,
+  onDeleteSession,
   onSubmitQuestion,
   onSelectCitation,
   citation
@@ -1630,11 +1632,34 @@ function ChatTab({
   sending: boolean;
   onSelectSession: (sessionId: number) => void;
   onCreateSession: () => void;
+  onRenameSession: (sessionId: number, newTitle: string) => void;
+  onDeleteSession: (sessionId: number) => void;
   onSubmitQuestion: (event: FormEvent<HTMLFormElement>) => void;
   onSelectCitation: (citation: Citation) => void;
   citation: Citation | null;
 }) {
   const session = space.sessions.find((item) => item.id === activeSessionId) || space.sessions[0];
+  const [editingSessionId, setEditingSessionId] = useState<number | null>(null);
+  const [editTitle, setEditTitle] = useState("");
+
+  function handleStartRename(sessionId: number, currentTitle: string) {
+    setEditingSessionId(sessionId);
+    setEditTitle(currentTitle);
+  }
+
+  function handleSaveRename() {
+    if (editingSessionId !== null && editTitle.trim()) {
+      onRenameSession(editingSessionId, editTitle.trim());
+      setEditingSessionId(null);
+      setEditTitle("");
+    }
+  }
+
+  function handleCancelRename() {
+    setEditingSessionId(null);
+    setEditTitle("");
+  }
+
   return (
     <section className="chat-layout">
       <aside className="surface session-panel">
@@ -1646,10 +1671,55 @@ function ChatTab({
         </div>
         <div className="session-list">
           {space.sessions.map((item) => (
-            <button key={item.id} className={`session-item ${item.id === session?.id ? "active" : ""}`} type="button" onClick={() => onSelectSession(item.id)}>
-              <strong>{item.title}</strong>
-              <span>{item.updatedAt}</span>
-            </button>
+            <div key={item.id} className={`session-item-wrapper ${item.id === session?.id ? "active" : ""}`}>
+              {editingSessionId === item.id ? (
+                <div className="session-edit-row">
+                  <input
+                    className="session-edit-input"
+                    value={editTitle}
+                    onChange={(e) => setEditTitle(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") handleSaveRename();
+                      if (e.key === "Escape") handleCancelRename();
+                    }}
+                    autoFocus
+                  />
+                  <button className="session-edit-btn" type="button" onClick={handleSaveRename}>✓</button>
+                  <button className="session-edit-btn" type="button" onClick={handleCancelRename}>✕</button>
+                </div>
+              ) : (
+                <button className="session-item" type="button" onClick={() => onSelectSession(item.id)}>
+                  <div className="session-item-content">
+                    <strong>{item.title}</strong>
+                    <span>{item.updatedAt}</span>
+                  </div>
+                  <div className="session-item-actions">
+                    <button
+                      className="session-action-btn"
+                      type="button"
+                      title="重命名"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleStartRename(item.id, item.title);
+                      }}
+                    >
+                      ✏️
+                    </button>
+                    <button
+                      className="session-action-btn"
+                      type="button"
+                      title="删除"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onDeleteSession(item.id);
+                      }}
+                    >
+                      🗑️
+                    </button>
+                  </div>
+                </button>
+              )}
+            </div>
           ))}
           {!space.sessions.length ? <EmptyState title="暂无会话" text="新建会话后，可以围绕当前知识库资料提问。" compact /> : null}
         </div>

@@ -34,11 +34,11 @@ export function LoginPage({ onLogin }: LoginPageProps) {
 
   return (
     <main className="login-shell">
-      <section className="login-card" aria-label="企业知识库登录">
+      <section className="login-card" aria-label="MarkVerse 登录">
         <aside className="login-intro">
           <div className="login-brand">
             <span className="brand-mark">KB</span>
-            <span>知识库工作台</span>
+            <span>MarkVerse</span>
           </div>
         </aside>
 

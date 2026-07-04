@@ -245,6 +245,19 @@ export async function listMessages(token: string, sessionId: number) {
   return messages.map(toChatMessage);
 }
 
+export async function updateChatSession(token: string, sessionId: number, title: string) {
+  await request<void>(token, `/api/chat/sessions/${sessionId}`, {
+    method: "PUT",
+    body: JSON.stringify({ title })
+  });
+}
+
+export async function deleteChatSession(token: string, sessionId: number) {
+  await request<void>(token, `/api/chat/sessions/${sessionId}`, {
+    method: "DELETE"
+  });
+}
+
 async function hydrateSpace(token: string, space: SpaceVO): Promise<KnowledgeSpace> {
   const [documents, members, sessionVOs] = await Promise.all([
     listDocuments(token, space.id),
