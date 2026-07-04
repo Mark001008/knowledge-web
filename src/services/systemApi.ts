@@ -12,6 +12,7 @@ import type {
   UpdatePermissionRequest,
   UserDTO
 } from "../shared/types/system";
+import { requireFreshLogin } from "./authSession";
 
 const API_BASE = "/api/system";
 
@@ -32,6 +33,10 @@ async function request<T>(url: string, options?: RequestInit): Promise<T> {
 
   if (!response.ok) {
     const error = await response.json().catch(() => ({}));
+    if (response.status === 401 || response.status === 403) {
+      requireFreshLogin();
+      throw new Error("登录状态已过期，请重新登录");
+    }
     throw new Error(error.message || `HTTP ${response.status}`);
   }
 

@@ -1,4 +1,5 @@
 import { appConfig } from "../config/appConfig";
+import { requireFreshLogin } from "./authSession";
 import type {
   ChatMessage,
   ChatSession,
@@ -100,6 +101,10 @@ async function request<T>(token: string, path: string, options: RequestInit = {}
   const payload = (await response.json().catch(() => null)) as ApiResponse<T> | null;
 
   if (!response.ok) {
+    if (response.status === 401 || response.status === 403) {
+      requireFreshLogin();
+      throw new Error("登录状态已过期，请重新登录");
+    }
     throw new Error(payload?.message || `请求失败，服务返回 ${response.status}`);
   }
   if (!payload || payload.code !== 0) {
