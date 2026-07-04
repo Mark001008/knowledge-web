@@ -44,7 +44,7 @@ export function LoginPage({ onLogin }: LoginPageProps) {
 
         <section className="login-panel">
           <div className="login-heading">
-            <p className="login-kicker">Account</p>
+            <p className="login-kicker">登录进入</p>
             <h2>欢迎回来</h2>
           </div>
           <form className="login-form" onSubmit={handleSubmit}>
@@ -66,9 +66,6 @@ export function LoginPage({ onLogin }: LoginPageProps) {
                 <input type="checkbox" checked={remember} onChange={(event) => setRemember(event.target.checked)} />
                 <span>保持登录</span>
               </label>
-              <button className="link-btn" type="button">
-                忘记密码
-              </button>
             </div>
             {error ? <p className="form-error">{error}</p> : null}
             <button type="submit" className="primary-btn full-width" disabled={submitting}>

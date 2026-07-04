@@ -1,4 +1,4 @@
-export type RouteKey = "spaces" | "operations" | "recent";
+export type RouteKey = "spaces" | "recent";
 export type DetailTab = "documents" | "chat" | "members" | "settings";
 export type DocumentStatus = "PENDING" | "PARSING" | "INDEXING" | "COMPLETED" | "FAILED";
 
@@ -67,16 +67,7 @@ export interface KnowledgeSpace {
   threshold: number;
   temperature: number;
   updatedAt: string;
-  hitRate: number;
-  avgLatency: number;
   members: Member[];
   documents: KnowledgeDocument[];
   sessions: ChatSession[];
-}
-
-export interface AuditLog {
-  actor: string;
-  action: string;
-  target: string;
-  time: string;
 }

@@ -184,6 +184,25 @@ export async function uploadDocument(token: string, spaceId: number, file: File)
   return listDocuments(token, spaceId);
 }
 
+export async function createOnlineDocument(token: string, spaceId: number, title: string, content: string) {
+  await request(token, `/api/spaces/${spaceId}/documents/online`, {
+    method: "POST",
+    body: JSON.stringify({ title, content })
+  });
+  return listDocuments(token, spaceId);
+}
+
+export async function getDocumentContent(token: string, documentId: number) {
+  return request<{ documentId: number; title: string; content: string; fileType: string; status: DocumentStatus }>(token, `/api/documents/${documentId}/content`);
+}
+
+export async function updateDocumentContent(token: string, documentId: number, title: string, content: string) {
+  await request(token, `/api/documents/${documentId}/content`, {
+    method: "PUT",
+    body: JSON.stringify({ title, content })
+  });
+}
+
 export async function deleteDocument(token: string, documentId: number) {
   await request<void>(token, `/api/documents/${documentId}`, {
     method: "DELETE"
@@ -253,8 +272,6 @@ function toKnowledgeSpace(space: SpaceVO, documents: KnowledgeDocument[], member
     threshold: Number(space.similarityThreshold ?? 0.7),
     temperature: Number(space.temperature ?? 0.2),
     updatedAt: formatTime(space.updatedAt),
-    hitRate: 0,
-    avgLatency: 0,
     members,
     documents,
     sessions
