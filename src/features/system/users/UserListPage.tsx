@@ -2,6 +2,46 @@ import { useEffect, useState } from "react";
 import { loadUsers, createUser, updateUser, updateUserStatus, resetPassword, assignRoles, loadRoles } from "../../../services/systemApi";
 import type { UserDTO, CreateUserRequest, RoleDetailDTO } from "../../../shared/types/system";
 
+// shadcn-ui components
+import { Button } from "../../../components/ui/button";
+import { Input } from "../../../components/ui/input";
+import { Label } from "../../../components/ui/label";
+import { Badge } from "../../../components/ui/badge";
+import { Checkbox } from "../../../components/ui/checkbox";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "../../../components/ui/table";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "../../../components/ui/dialog";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "../../../components/ui/dropdown-menu";
+import { ScrollArea } from "../../../components/ui/scroll-area";
+import {
+  IconPlus,
+  IconDots,
+  IconEdit,
+  IconRefresh,
+  IconUserCog,
+  IconLoader2
+} from "@tabler/icons-react";
+
 interface UserListPageProps {
   token: string;
 }
@@ -137,188 +177,262 @@ export function UserListPage({ token }: UserListPageProps) {
   }
 
   if (loading) {
-    return <div className="loading">加载中...</div>;
+    return (
+      <div className="flex items-center justify-center h-64">
+        <IconLoader2 className="h-8 w-8 animate-spin" />
+      </div>
+    );
   }
 
   return (
-    <div className="page-container">
-      <div className="page-header">
-        <h1>用户管理</h1>
-        <button className="btn btn-primary" onClick={() => setShowCreateDialog(true)}>
+    <div className="space-y-4">
+      <div className="flex items-center justify-between">
+        <div>
+          <h2 className="text-2xl font-bold tracking-tight">用户管理</h2>
+          <p className="text-muted-foreground">
+            管理系统中的所有用户
+          </p>
+        </div>
+        <Button onClick={() => setShowCreateDialog(true)}>
+          <IconPlus className="mr-2 h-4 w-4" />
           新建用户
-        </button>
+        </Button>
       </div>
 
-      <div className="table-container">
-        <table className="data-table">
-          <thead>
-            <tr>
-              <th>用户名</th>
-              <th>显示名称</th>
-              <th>邮箱</th>
-              <th>角色</th>
-              <th>状态</th>
-              <th>创建时间</th>
-              <th>操作</th>
-            </tr>
-          </thead>
-          <tbody>
-            {users.map(user => (
-              <tr key={user.id}>
-                <td>{user.username}</td>
-                <td>{user.displayName}</td>
-                <td>{user.email || "-"}</td>
-                <td>{user.roles?.map(r => r.roleName).join(", ") || "-"}</td>
-                <td>
-                  <span className={`status-badge ${user.status === "ENABLED" ? "status-enabled" : "status-disabled"}`}>
-                    {user.status === "ENABLED" ? "启用" : "禁用"}
-                  </span>
-                </td>
-                <td>{new Date(user.createdAt).toLocaleString()}</td>
-                <td>
-                  <div className="action-buttons">
-                    <button className="btn btn-small" onClick={() => openEditDialog(user)}>编辑</button>
-                    <button className="btn btn-small" onClick={() => handleToggleStatus(user)}>
-                      {user.status === "ENABLED" ? "禁用" : "启用"}
-                    </button>
-                    <button className="btn btn-small" onClick={() => openResetPasswordDialog(user)}>重置密码</button>
-                    <button className="btn btn-small" onClick={() => openAssignRolesDialog(user)}>分配角色</button>
+      <div className="rounded-md border">
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>用户名</TableHead>
+              <TableHead>显示名称</TableHead>
+              <TableHead>邮箱</TableHead>
+              <TableHead>角色</TableHead>
+              <TableHead>状态</TableHead>
+              <TableHead>创建时间</TableHead>
+              <TableHead className="text-right">操作</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {users.map((user) => (
+              <TableRow key={user.id}>
+                <TableCell className="font-medium">{user.username}</TableCell>
+                <TableCell>{user.displayName}</TableCell>
+                <TableCell>{user.email || "-"}</TableCell>
+                <TableCell>
+                  <div className="flex flex-wrap gap-1">
+                    {user.roles?.map((role) => (
+                      <Badge key={role.roleCode} variant="secondary">
+                        {role.roleName}
+                      </Badge>
+                    ))}
                   </div>
-                </td>
-              </tr>
+                </TableCell>
+                <TableCell>
+                  <Badge variant={user.status === "ENABLED" ? "default" : "destructive"}>
+                    {user.status === "ENABLED" ? "启用" : "禁用"}
+                  </Badge>
+                </TableCell>
+                <TableCell>{new Date(user.createdAt).toLocaleString()}</TableCell>
+                <TableCell className="text-right">
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <Button variant="ghost" className="h-8 w-8 p-0">
+                        <span className="sr-only">打开菜单</span>
+                        <IconDots className="h-4 w-4" />
+                      </Button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="end">
+                      <DropdownMenuLabel>操作</DropdownMenuLabel>
+                      <DropdownMenuItem onClick={() => openEditDialog(user)}>
+                        <IconEdit className="mr-2 h-4 w-4" />
+                        编辑
+                      </DropdownMenuItem>
+                      <DropdownMenuItem onClick={() => handleToggleStatus(user)}>
+                        <IconRefresh className="mr-2 h-4 w-4" />
+                        {user.status === "ENABLED" ? "禁用" : "启用"}
+                      </DropdownMenuItem>
+                      <DropdownMenuItem onClick={() => openResetPasswordDialog(user)}>
+                        <IconRefresh className="mr-2 h-4 w-4" />
+                        重置密码
+                      </DropdownMenuItem>
+                      <DropdownMenuSeparator />
+                      <DropdownMenuItem onClick={() => openAssignRolesDialog(user)}>
+                        <IconUserCog className="mr-2 h-4 w-4" />
+                        分配角色
+                      </DropdownMenuItem>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                </TableCell>
+              </TableRow>
             ))}
-          </tbody>
-        </table>
+          </TableBody>
+        </Table>
       </div>
 
       {/* 创建用户对话框 */}
-      {showCreateDialog && (
-        <div className="dialog-overlay">
-          <div className="dialog">
-            <h2>新建用户</h2>
-            <div className="form-group">
-              <label>用户名</label>
-              <input
-                type="text"
+      <Dialog open={showCreateDialog} onOpenChange={setShowCreateDialog}>
+        <DialogContent className="sm:max-w-[425px]">
+          <DialogHeader>
+            <DialogTitle>新建用户</DialogTitle>
+            <DialogDescription>
+              创建一个新的系统用户
+            </DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-4 py-4">
+            <div className="grid gap-2">
+              <Label htmlFor="username">用户名</Label>
+              <Input
+                id="username"
                 value={formData.username}
-                onChange={e => setFormData({ ...formData, username: e.target.value })}
+                onChange={(e) => setFormData({ ...formData, username: e.target.value })}
+                placeholder="请输入用户名"
               />
             </div>
-            <div className="form-group">
-              <label>密码</label>
-              <input
+            <div className="grid gap-2">
+              <Label htmlFor="password">密码</Label>
+              <Input
+                id="password"
                 type="password"
                 value={formData.password}
-                onChange={e => setFormData({ ...formData, password: e.target.value })}
+                onChange={(e) => setFormData({ ...formData, password: e.target.value })}
+                placeholder="请输入密码"
               />
             </div>
-            <div className="form-group">
-              <label>显示名称</label>
-              <input
-                type="text"
+            <div className="grid gap-2">
+              <Label htmlFor="displayName">显示名称</Label>
+              <Input
+                id="displayName"
                 value={formData.displayName}
-                onChange={e => setFormData({ ...formData, displayName: e.target.value })}
+                onChange={(e) => setFormData({ ...formData, displayName: e.target.value })}
+                placeholder="请输入显示名称"
               />
             </div>
-            <div className="form-group">
-              <label>邮箱</label>
-              <input
+            <div className="grid gap-2">
+              <Label htmlFor="email">邮箱</Label>
+              <Input
+                id="email"
                 type="email"
                 value={formData.email}
-                onChange={e => setFormData({ ...formData, email: e.target.value })}
+                onChange={(e) => setFormData({ ...formData, email: e.target.value })}
+                placeholder="请输入邮箱"
               />
             </div>
-            <div className="dialog-actions">
-              <button className="btn" onClick={() => setShowCreateDialog(false)}>取消</button>
-              <button className="btn btn-primary" onClick={handleCreateUser}>确定</button>
-            </div>
           </div>
-        </div>
-      )}
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowCreateDialog(false)}>
+              取消
+            </Button>
+            <Button onClick={handleCreateUser}>确定</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* 编辑用户对话框 */}
-      {showEditDialog && selectedUser && (
-        <div className="dialog-overlay">
-          <div className="dialog">
-            <h2>编辑用户</h2>
-            <div className="form-group">
-              <label>显示名称</label>
-              <input
-                type="text"
+      <Dialog open={showEditDialog} onOpenChange={setShowEditDialog}>
+        <DialogContent className="sm:max-w-[425px]">
+          <DialogHeader>
+            <DialogTitle>编辑用户</DialogTitle>
+            <DialogDescription>
+              修改用户信息
+            </DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-4 py-4">
+            <div className="grid gap-2">
+              <Label htmlFor="edit-displayName">显示名称</Label>
+              <Input
+                id="edit-displayName"
                 value={editFormData.displayName}
-                onChange={e => setEditFormData({ ...editFormData, displayName: e.target.value })}
+                onChange={(e) => setEditFormData({ ...editFormData, displayName: e.target.value })}
+                placeholder="请输入显示名称"
               />
             </div>
-            <div className="form-group">
-              <label>邮箱</label>
-              <input
+            <div className="grid gap-2">
+              <Label htmlFor="edit-email">邮箱</Label>
+              <Input
+                id="edit-email"
                 type="email"
                 value={editFormData.email}
-                onChange={e => setEditFormData({ ...editFormData, email: e.target.value })}
+                onChange={(e) => setEditFormData({ ...editFormData, email: e.target.value })}
+                placeholder="请输入邮箱"
               />
             </div>
-            <div className="dialog-actions">
-              <button className="btn" onClick={() => setShowEditDialog(false)}>取消</button>
-              <button className="btn btn-primary" onClick={handleUpdateUser}>确定</button>
-            </div>
           </div>
-        </div>
-      )}
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowEditDialog(false)}>
+              取消
+            </Button>
+            <Button onClick={handleUpdateUser}>确定</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* 重置密码对话框 */}
-      {showResetPasswordDialog && selectedUser && (
-        <div className="dialog-overlay">
-          <div className="dialog">
-            <h2>重置密码 - {selectedUser.username}</h2>
-            <div className="form-group">
-              <label>新密码</label>
-              <input
+      <Dialog open={showResetPasswordDialog} onOpenChange={setShowResetPasswordDialog}>
+        <DialogContent className="sm:max-w-[425px]">
+          <DialogHeader>
+            <DialogTitle>重置密码</DialogTitle>
+            <DialogDescription>
+              为用户 {selectedUser?.username} 重置密码
+            </DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-4 py-4">
+            <div className="grid gap-2">
+              <Label htmlFor="newPassword">新密码</Label>
+              <Input
+                id="newPassword"
                 type="password"
                 value={newPassword}
-                onChange={e => setNewPassword(e.target.value)}
+                onChange={(e) => setNewPassword(e.target.value)}
+                placeholder="请输入新密码"
               />
             </div>
-            <div className="dialog-actions">
-              <button className="btn" onClick={() => setShowResetPasswordDialog(false)}>取消</button>
-              <button className="btn btn-primary" onClick={handleResetPassword}>确定</button>
-            </div>
           </div>
-        </div>
-      )}
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowResetPasswordDialog(false)}>
+              取消
+            </Button>
+            <Button onClick={handleResetPassword}>确定</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* 分配角色对话框 */}
-      {showAssignRolesDialog && selectedUser && (
-        <div className="dialog-overlay">
-          <div className="dialog">
-            <h2>分配角色 - {selectedUser.username}</h2>
-            <div className="form-group">
-              <label>角色</label>
-              <div className="checkbox-group">
-                {roles.map(role => (
-                  <label key={role.id} className="checkbox-label">
-                    <input
-                      type="checkbox"
-                      checked={selectedRoleIds.includes(role.id)}
-                      onChange={e => {
-                        if (e.target.checked) {
-                          setSelectedRoleIds([...selectedRoleIds, role.id]);
-                        } else {
-                          setSelectedRoleIds(selectedRoleIds.filter(id => id !== role.id));
-                        }
-                      }}
-                    />
-                    {role.roleName}
-                  </label>
-                ))}
-              </div>
+      <Dialog open={showAssignRolesDialog} onOpenChange={setShowAssignRolesDialog}>
+        <DialogContent className="sm:max-w-[425px]">
+          <DialogHeader>
+            <DialogTitle>分配角色</DialogTitle>
+            <DialogDescription>
+              为用户 {selectedUser?.username} 分配角色
+            </DialogDescription>
+          </DialogHeader>
+          <ScrollArea className="h-[300px]">
+            <div className="space-y-4 p-4">
+              {roles.map((role) => (
+                <div key={role.id} className="flex items-center space-x-2">
+                  <Checkbox
+                    id={`role-${role.id}`}
+                    checked={selectedRoleIds.includes(role.id)}
+                    onCheckedChange={(checked) => {
+                      if (checked) {
+                        setSelectedRoleIds([...selectedRoleIds, role.id]);
+                      } else {
+                        setSelectedRoleIds(selectedRoleIds.filter(id => id !== role.id));
+                      }
+                    }}
+                  />
+                  <Label htmlFor={`role-${role.id}`}>{role.roleName}</Label>
+                </div>
+              ))}
             </div>
-            <div className="dialog-actions">
-              <button className="btn" onClick={() => setShowAssignRolesDialog(false)}>取消</button>
-              <button className="btn btn-primary" onClick={handleAssignRoles}>确定</button>
-            </div>
-          </div>
-        </div>
-      )}
+          </ScrollArea>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowAssignRolesDialog(false)}>
+              取消
+            </Button>
+            <Button onClick={handleAssignRoles}>确定</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
