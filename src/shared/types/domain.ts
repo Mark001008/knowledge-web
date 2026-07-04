@@ -1,4 +1,6 @@
-export type RouteKey = "spaces" | "recent";
+import type { MenuDTO, RoleDTO } from "./system";
+
+export type RouteKey = "spaces" | "recent" | "system";
 export type DetailTab = "documents" | "chat" | "members" | "settings";
 export type DocumentStatus = "PENDING" | "PARSING" | "INDEXING" | "COMPLETED" | "FAILED";
 
@@ -6,13 +8,15 @@ export interface UserInfo {
   id?: number;
   username?: string;
   displayName?: string;
-  roles?: string[];
+  roles?: RoleDTO[];
 }
 
 export interface LoginResponse {
   accessToken: string;
   expiresIn?: number;
   user?: UserInfo;
+  permissions?: string[];
+  menus?: MenuDTO[];
 }
 
 export interface Citation {

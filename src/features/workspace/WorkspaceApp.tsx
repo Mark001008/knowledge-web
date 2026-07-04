@@ -18,10 +18,18 @@ import {
 } from "../../services/workspaceApi";
 import { statusClass, statusLabel } from "../../shared/status";
 import type { Citation, DetailTab, DocumentStatus, KnowledgeDocument, KnowledgeSpace, RouteKey, UserInfo } from "../../shared/types/domain";
+import type { MenuDTO } from "../../shared/types/system";
+import { UserListPage } from "../system/users/UserListPage";
+import { RoleListPage } from "../system/roles/RoleListPage";
+import { MenuListPage } from "../system/menus/MenuListPage";
+import { PermissionListPage } from "../system/permissions/PermissionListPage";
+import { NoPermissionPage } from "../../shared/components/NoPermissionPage";
 
 interface WorkspaceAppProps {
   token: string;
   user: UserInfo;
+  permissions: string[];
+  menus: MenuDTO[];
   onLogout: () => void;
 }
 
@@ -144,7 +152,7 @@ const editorSizes: Record<EditorSize, string> = {
   大: "6"
 };
 
-export function WorkspaceApp({ token, user, onLogout }: WorkspaceAppProps) {
+export function WorkspaceApp({ token, user, permissions, menus, onLogout }: WorkspaceAppProps) {
   const [route, setRoute] = useState<RouteKey>("spaces");
   const [activeSpaceId, setActiveSpaceId] = useState<number | null>(null);
   const [activeTab, setActiveTab] = useState<DetailTab>("documents");
@@ -158,6 +166,10 @@ export function WorkspaceApp({ token, user, onLogout }: WorkspaceAppProps) {
   const [busyActions, setBusyActions] = useState<Set<BusyAction>>(new Set());
 
   const displayName = user.displayName || user.username || "管理员";
+
+  // 权限检查函数
+  const hasPermission = (code: string) => permissions.includes(code);
+  const hasAnyPermission = (codes: string[]) => codes.some(code => permissions.includes(code));
   const activeSpace = spaces.find((space) => space.id === activeSpaceId) || null;
   const activeSession = activeSpace?.sessions.find((session) => session.id === activeSessionId) || activeSpace?.sessions[0] || null;
   const allDocuments = useMemo(() => spaces.flatMap((space) => space.documents), [spaces]);
@@ -495,12 +507,22 @@ export function WorkspaceApp({ token, user, onLogout }: WorkspaceAppProps) {
           <span>知识库工作台</span>
         </div>
         <nav className="nav-list" aria-label="主导航">
-          {[
-            ["spaces", "知识库"],
-            ["recent", "最近问答"]
-          ].map(([key, label]) => (
-            <button key={key} className={`nav-item ${route === key ? "active" : ""}`} type="button" onClick={() => openRoute(key as RouteKey)}>
-              {label}
+          {menus.map((menu) => (
+            <button
+              key={menu.path}
+              className={`nav-item ${route === menu.path?.replace('/', '') ? "active" : ""}`}
+              type="button"
+              onClick={() => {
+                if (menu.path === '/workspace') {
+                  openRoute('spaces');
+                } else if (menu.path === '/recent-qa') {
+                  openRoute('recent');
+                } else if (menu.path?.startsWith('/system')) {
+                  openRoute('system');
+                }
+              }}
+            >
+              {menu.menuName}
             </button>
           ))}
         </nav>
@@ -568,6 +590,7 @@ export function WorkspaceApp({ token, user, onLogout }: WorkspaceAppProps) {
             activeSessionId={activeSession?.id || null}
             citation={citation}
             busyActions={busyActions}
+            permissions={permissions}
             onTabChange={setActiveTab}
             onUpload={addDocument}
             onCreateOnlineDocument={() => setDocumentPage({ mode: "create", title: "未命名文档", content: "", fileType: "MARKDOWN" })}
@@ -588,8 +611,97 @@ export function WorkspaceApp({ token, user, onLogout }: WorkspaceAppProps) {
         ) : null}
 
         {!loading && route === "recent" ? <RecentQuestions sessions={recentSessions} onOpenSession={(spaceId, sessionId) => openSpace(spaceId, "chat", sessionId)} /> : null}
+
+        {!loading && route === "system" ? (
+          <SystemManagement
+            menus={menus}
+            permissions={permissions}
+            token={token}
+          />
+        ) : null}
       </section>
     </main>
+  );
+}
+
+function SystemManagement({
+  menus,
+  permissions,
+  token
+}: {
+  menus: MenuDTO[];
+  permissions: string[];
+  token: string;
+}) {
+  const [activePage, setActivePage] = useState<string>("users");
+
+  // 权限检查函数
+  const hasPermission = (code: string) => permissions.includes(code);
+  const hasAnyPermission = (codes: string[]) => codes.some(code => permissions.includes(code));
+
+  // 检查是否有系统管理权限
+  const hasSystemPermission = hasAnyPermission([
+    "user:view", "role:view", "menu:view", "permission:view"
+  ]);
+
+  if (!hasSystemPermission) {
+    return <NoPermissionPage />;
+  }
+
+  return (
+    <div className="system-management">
+      <div className="system-sidebar">
+        <h3>系统管理</h3>
+        <nav className="system-nav">
+          {hasPermission("user:view") && (
+            <button
+              className={`system-nav-item ${activePage === "users" ? "active" : ""}`}
+              onClick={() => setActivePage("users")}
+            >
+              用户管理
+            </button>
+          )}
+          {hasPermission("role:view") && (
+            <button
+              className={`system-nav-item ${activePage === "roles" ? "active" : ""}`}
+              onClick={() => setActivePage("roles")}
+            >
+              角色管理
+            </button>
+          )}
+          {hasPermission("menu:view") && (
+            <button
+              className={`system-nav-item ${activePage === "menus" ? "active" : ""}`}
+              onClick={() => setActivePage("menus")}
+            >
+              菜单管理
+            </button>
+          )}
+          {hasPermission("permission:view") && (
+            <button
+              className={`system-nav-item ${activePage === "permissions" ? "active" : ""}`}
+              onClick={() => setActivePage("permissions")}
+            >
+              权限管理
+            </button>
+          )}
+        </nav>
+      </div>
+      <div className="system-content">
+        {activePage === "users" && hasPermission("user:view") && (
+          <UserListPage token={token} />
+        )}
+        {activePage === "roles" && hasPermission("role:view") && (
+          <RoleListPage token={token} />
+        )}
+        {activePage === "menus" && hasPermission("menu:view") && (
+          <MenuListPage token={token} />
+        )}
+        {activePage === "permissions" && hasPermission("permission:view") && (
+          <PermissionListPage token={token} />
+        )}
+      </div>
+    </div>
   );
 }
 
@@ -677,6 +789,7 @@ function SpaceDetail({
   activeSessionId,
   citation,
   busyActions,
+  permissions,
   onTabChange,
   onUpload,
   onCreateOnlineDocument,
@@ -699,6 +812,7 @@ function SpaceDetail({
   activeSessionId: number | null;
   citation: Citation | null;
   busyActions: Set<BusyAction>;
+  permissions: string[];
   onTabChange: (tab: DetailTab) => void;
   onUpload: (file: File) => void;
   onCreateOnlineDocument: () => void;
@@ -716,6 +830,8 @@ function SpaceDetail({
   onSubmitSettings: (event: FormEvent<HTMLFormElement>) => void;
   onDeleteSpace: () => void;
 }) {
+  // 权限检查函数
+  const hasPermission = (code: string) => permissions.includes(code);
   return (
     <section className="page-stack">
       <section className="surface detail-hero">
@@ -750,6 +866,7 @@ function SpaceDetail({
           uploading={busyActions.has(`upload-${space.id}`)}
           refreshing={busyActions.has("refresh-space")}
           busyActions={busyActions}
+          permissions={permissions}
           onUpload={onUpload}
           onCreateOnlineDocument={onCreateOnlineDocument}
           onViewDocument={onViewDocument}
@@ -859,6 +976,7 @@ function DocumentsTab({
   uploading,
   refreshing,
   busyActions,
+  permissions,
   onUpload,
   onCreateOnlineDocument,
   onViewDocument,
@@ -871,6 +989,7 @@ function DocumentsTab({
   uploading: boolean;
   refreshing: boolean;
   busyActions: Set<BusyAction>;
+  permissions: string[];
   onUpload: (file: File) => void;
   onCreateOnlineDocument: () => void;
   onViewDocument: (document: KnowledgeDocument) => void;
@@ -879,6 +998,8 @@ function DocumentsTab({
   onReindex: (documentId: number) => void;
   onRefresh: () => void;
 }) {
+  // 权限检查函数
+  const hasPermission = (code: string) => permissions.includes(code);
   return (
     <section className="surface">
       <div className="section-header">
@@ -891,11 +1012,13 @@ function DocumentsTab({
         </button>
       </div>
       <div className="document-create-row">
-        <UploadZone onUpload={onUpload} uploading={uploading} />
-        <button className="online-create-btn" type="button" onClick={onCreateOnlineDocument}>
-          <strong>新建在线文档</strong>
-          <span>直接编写文档内容，保存后自动入库。</span>
-        </button>
+        {hasPermission("document:upload") && <UploadZone onUpload={onUpload} uploading={uploading} />}
+        {hasPermission("document:create") && (
+          <button className="online-create-btn" type="button" onClick={onCreateOnlineDocument}>
+            <strong>新建在线文档</strong>
+            <span>直接编写文档内容，保存后自动入库。</span>
+          </button>
+        )}
       </div>
       <div className="table-wrap">
         <table>
@@ -933,17 +1056,21 @@ function DocumentsTab({
                       <button className="link-btn" type="button" onClick={() => onViewDocument(doc)} disabled={viewing || editing || reindexing || deleting}>
                         {viewing ? "打开中" : "查看"}
                       </button>
-                      {editable ? (
+                      {editable && hasPermission("document:update") ? (
                         <button className="link-btn" type="button" onClick={() => onEditOnlineDocument(doc)} disabled={editing || reindexing || deleting}>
                           {editing ? "打开中" : "编辑"}
                         </button>
                       ) : null}
-                      <button className="link-btn" type="button" onClick={() => onReindex(doc.id)} disabled={reindexing || deleting}>
-                        {reindexing ? "重建中" : "重建"}
-                      </button>
-                      <button className="link-btn danger-link" type="button" onClick={() => onDelete(doc.id)} disabled={deleting || reindexing}>
-                        {deleting ? "删除中" : "删除"}
-                      </button>
+                      {hasPermission("document:rebuild") && (
+                        <button className="link-btn" type="button" onClick={() => onReindex(doc.id)} disabled={reindexing || deleting}>
+                          {reindexing ? "重建中" : "重建"}
+                        </button>
+                      )}
+                      {hasPermission("document:delete") && (
+                        <button className="link-btn danger-link" type="button" onClick={() => onDelete(doc.id)} disabled={deleting || reindexing}>
+                          {deleting ? "删除中" : "删除"}
+                        </button>
+                      )}
                     </div>
                   </td>
                 </tr>
