@@ -1005,7 +1005,7 @@ function DocumentsTab({
       <div className="section-header">
         <div>
           <h3>文档</h3>
-          <p>支持 PDF、TXT、Markdown。上传后会异步解析并写入文档分片；当前未启用 Milvus 时会跳过向量入库。</p>
+          <p>支持 PDF、TXT、Markdown。上传或重建后会完成解析、切片、分片落库，并写入 Qdrant 向量索引。</p>
         </div>
         <button className="secondary-btn" type="button" onClick={onRefresh} disabled={refreshing}>
           {refreshing ? "刷新中" : "刷新状态"}
@@ -1661,7 +1661,7 @@ function ChatTab({
             <article className={`message ${message.role}`} key={`${message.role}-${messageIndex}`}>
               <div>{message.content}</div>
               {message.role === "assistant" && !message.citations?.length ? (
-                <p className="message-note">未返回引用来源。当前未启用向量检索或知识库中没有匹配片段时，可能出现这种情况。</p>
+                <p className="message-note">未返回引用来源。知识库中没有匹配片段，或相关文档尚未完成索引时，可能出现这种情况。</p>
               ) : null}
               {message.citations?.length ? (
                 <div className="citation-list">
@@ -1829,8 +1829,8 @@ function SettingsTab({
       </section>
       <section className="surface quiet-panel">
         <h3>当前说明</h3>
-        <p>当前部署默认关闭 Milvus。文档仍会完成上传、解析、切片和分片落库；问答在没有可用检索片段时会返回无匹配提示。</p>
-        <p>后续独立 Milvus 服务就绪后，可通过配置开启向量写入和检索。</p>
+        <p>当前部署使用轻量 Qdrant。文档会完成上传、解析、切片、分片落库和向量入库；问答会从当前知识库检索相关片段并返回引用来源。</p>
+        <p>历史文档如果是在向量库关闭时上传的，需要执行一次重建，才能进入新的 RAG 检索链路。</p>
       </section>
     </section>
   );
