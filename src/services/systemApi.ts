@@ -16,7 +16,11 @@ import type {
 const API_BASE = "/api/system";
 
 async function request<T>(url: string, options?: RequestInit): Promise<T> {
-  const token = localStorage.getItem("accessToken") || sessionStorage.getItem("accessToken");
+  const token =
+    localStorage.getItem("kb_access_token") ||
+    sessionStorage.getItem("kb_access_token") ||
+    localStorage.getItem("accessToken") ||
+    sessionStorage.getItem("accessToken");
   const response = await fetch(url, {
     ...options,
     headers: {
