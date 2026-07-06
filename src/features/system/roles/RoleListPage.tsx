@@ -95,10 +95,12 @@ export function RoleListPage({ token }: RoleListPageProps) {
   async function handleAssignPermissions() {
     if (!selectedRole) return;
     try {
+      console.log("分配权限:", selectedPermissionIds);
       await assignPermissions(selectedRole.id, selectedPermissionIds);
       setShowAssignPermissionsDialog(false);
       setSelectedRole(null);
       loadData();
+      alert("权限分配成功！");
     } catch (error) {
       console.error("分配权限失败:", error);
       alert("分配权限失败");
@@ -131,7 +133,10 @@ export function RoleListPage({ token }: RoleListPageProps) {
     setSelectedRole(role);
     try {
       const permissionIds = await getRolePermissionIds(role.id);
-      setSelectedPermissionIds(permissionIds);
+      console.log("获取到的权限ID:", permissionIds);
+      // 确保是数字数组
+      const numericIds = permissionIds.map(id => Number(id));
+      setSelectedPermissionIds(numericIds);
     } catch (error) {
       console.error("获取角色权限失败:", error);
       setSelectedPermissionIds([]);

@@ -263,6 +263,13 @@ export async function deleteChatSession(token: string, sessionId: number) {
   });
 }
 
+export async function listRecentSessions(token: string, limit = 20) {
+  return request<Array<{ sessionId: number; spaceId: number; spaceName: string; title: string; updatedAt: string }>>(
+    token,
+    `/api/chat/recent-sessions?limit=${limit}`
+  );
+}
+
 async function hydrateSpace(token: string, space: SpaceVO): Promise<KnowledgeSpace> {
   const [documents, members, sessionVOs] = await Promise.all([
     listDocuments(token, space.id),

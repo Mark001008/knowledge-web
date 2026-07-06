@@ -15,6 +15,7 @@ import {
   deleteDocument,
   deleteKnowledgeSpace,
   getDocumentContent,
+  listRecentSessions,
   loadKnowledgeSpace,
   loadSpaceDetail,
   loadWorkspace,
@@ -101,6 +102,7 @@ export function WorkspaceApp({ token, user, permissions, menus, onLogout }: Work
   const [activeTab, setActiveTab] = useState<DetailTab>("documents");
   const [activeSessionId, setActiveSessionId] = useState<number | null>(null);
   const [spaces, setSpaces] = useState<KnowledgeSpace[]>([]);
+  const [recentSessions, setRecentSessions] = useState<Array<{ sessionId: number; spaceId: number; spaceName: string; title: string; updatedAt: string }>>([]);
   const [keyword, setKeyword] = useState("");
   const [citation, setCitation] = useState<Citation | null>(null);
   const [documentPage, setDocumentPage] = useState<DocumentPageState | null>(null);
@@ -117,9 +119,6 @@ export function WorkspaceApp({ token, user, permissions, menus, onLogout }: Work
   const activeSession = activeSpace?.sessions?.find((session) => session.id === activeSessionId) || activeSpace?.sessions?.[0] || null;
   const allDocuments = useMemo(() => spaces.flatMap((space) => space.documents ?? []), [spaces]);
   const processingDocuments = allDocuments.filter((doc) => isProcessingStatus(doc.status));
-  const recentSessions = spaces
-    .flatMap((space) => (space.sessions ?? []).map((session) => ({ ...session, spaceId: space.id, spaceName: space.name })))
-    .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
   const filteredSpaces = spaces.filter((space) => {
     const query = keyword.trim().toLowerCase();
     return !query || `${space.name} ${space.description}`.toLowerCase().includes(query);
@@ -147,8 +146,12 @@ export function WorkspaceApp({ token, user, permissions, menus, onLogout }: Work
     setLoading(true);
     setApiError("");
     try {
-      const nextSpaces = await loadWorkspace(token);
+      const [nextSpaces, sessions] = await Promise.all([
+        loadWorkspace(token),
+        listRecentSessions(token, 20)
+      ]);
       setSpaces(nextSpaces);
+      setRecentSessions(sessions);
       if (activeSpaceId && !nextSpaces.some((space) => space.id === activeSpaceId)) {
         setActiveSpaceId(null);
         setActiveSessionId(null);
@@ -699,7 +702,7 @@ function WorkspaceHome({
   allSpaces: KnowledgeSpace[];
   documents: KnowledgeDocument[];
   processingDocuments: KnowledgeDocument[];
-  recentSessions: Array<{ id: number; title: string; updatedAt: string; spaceId: number; spaceName: string }>;
+  recentSessions: Array<{ sessionId: number; spaceId: number; spaceName: string; title: string; updatedAt: string }>;
   keyword: string;
   onKeywordChange: (value: string) => void;
   onCreateSpace: () => void;
@@ -763,8 +766,14 @@ function WorkspaceHome({
               </div>
               <p>{space.description || "暂无描述"}</p>
               <div className="card-meta">
-                <span>{space.documentCount ?? space.documents?.length ?? 0} 个文档</span>
-                <span>{space.sessionCount ?? space.sessions?.length ?? 0} 个会话</span>
+                {space.loaded ? (
+                  <>
+                    <span>{space.documents?.length ?? 0} 个文档</span>
+                    <span>{space.sessions?.length ?? 0} 个会话</span>
+                  </>
+                ) : (
+                  <span style={{ color: 'var(--muted)' }}>点击进入查看详情</span>
+                )}
                 <span>{space.updatedAt}</span>
               </div>
               <button className="secondary-btn full-width" type="button" onClick={() => onOpenSpace(space.id)}>
@@ -944,7 +953,7 @@ function RecentPanel({
   sessions,
   onOpenSession
 }: {
-  sessions: Array<{ id: number; title: string; updatedAt: string; spaceId: number; spaceName: string }>;
+  sessions: Array<{ sessionId: number; spaceId: number; spaceName: string; title: string; updatedAt: string }>;
   onOpenSession: (spaceId: number, tab?: DetailTab, sessionId?: number) => void;
 }) {
   return (
@@ -954,7 +963,7 @@ function RecentPanel({
       </div>
       <div className="simple-list">
         {sessions.map((session) => (
-          <button className="list-row as-button" key={`${session.spaceId}-${session.id}`} type="button" onClick={() => onOpenSession(session.spaceId, "chat", session.id)}>
+          <button className="list-row as-button" key={`${session.spaceId}-${session.sessionId}`} type="button" onClick={() => onOpenSession(session.spaceId, "chat", session.sessionId)}>
             <div>
               <strong>{session.title}</strong>
               <span>{session.spaceName} · {session.updatedAt}</span>
@@ -1903,7 +1912,7 @@ function RecentQuestions({
   sessions,
   onOpenSession
 }: {
-  sessions: Array<{ id: number; title: string; updatedAt: string; spaceId: number; spaceName: string }>;
+  sessions: Array<{ sessionId: number; spaceId: number; spaceName: string; title: string; updatedAt: string }>;
   onOpenSession: (spaceId: number, sessionId: number) => void;
 }) {
   return (
@@ -1916,7 +1925,7 @@ function RecentQuestions({
       </div>
       <div className="recent-list">
         {sessions.map((session) => (
-          <button className="recent-item" key={`${session.spaceId}-${session.id}`} type="button" onClick={() => onOpenSession(session.spaceId, session.id)}>
+          <button className="recent-item" key={`${session.spaceId}-${session.sessionId}`} type="button" onClick={() => onOpenSession(session.spaceId, session.sessionId)}>
             <strong>{session.title}</strong>
             <span>{session.spaceName} · {session.updatedAt}</span>
           </button>
