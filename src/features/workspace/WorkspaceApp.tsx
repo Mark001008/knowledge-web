@@ -5,6 +5,7 @@ import Placeholder from "@tiptap/extension-placeholder";
 import Underline from "@tiptap/extension-underline";
 import Link from "@tiptap/extension-link";
 import { marked } from "marked";
+import { MarkdownRenderer } from "../../components/ui/MarkdownRenderer";
 import {
   addSpaceMember,
   createChatSession,
@@ -1232,10 +1233,7 @@ function DocumentReadPage({
       </section>
       <section className={`surface document-render ${page.fileType.toLowerCase()}`}>
         {page.fileType === "MARKDOWN" ? (
-          <div
-            className="tiptap-content"
-            dangerouslySetInnerHTML={{ __html: htmlContent }}
-          />
+          <MarkdownRenderer content={page.content} className="tiptap-content" />
         ) : (
           <pre>{page.content || "暂无可预览内容。"}</pre>
         )}
@@ -1729,7 +1727,11 @@ function ChatTab({
         <div className="message-list">
           {session?.messages.map((message, messageIndex) => (
             <article className={`message ${message.role}`} key={`${message.role}-${messageIndex}`}>
-              <div>{message.content}</div>
+              {message.role === "assistant" ? (
+                <MarkdownRenderer content={message.content} />
+              ) : (
+                <div>{message.content}</div>
+              )}
               {message.role === "assistant" && !message.citations?.length ? (
                 <p className="message-note">未返回引用来源。知识库中没有匹配片段，或相关文档尚未完成索引时，可能出现这种情况。</p>
               ) : null}

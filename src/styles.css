@@ -2539,3 +2539,126 @@ td {
     gap: 12px;
   }
 }
+
+/* ==================== Markdown 渲染统一样式 ==================== */
+
+.markdown-content {
+  font-size: 16px;
+  line-height: 1.75;
+  color: #1f2937;
+}
+
+.markdown-content p {
+  margin: 0.5em 0;
+}
+
+.markdown-content h1 {
+  font-size: 2em;
+  font-weight: 700;
+  margin: 0.67em 0;
+  color: #111827;
+}
+
+.markdown-content h2 {
+  font-size: 1.5em;
+  font-weight: 700;
+  margin: 0.75em 0;
+  color: #111827;
+}
+
+.markdown-content h3 {
+  font-size: 1.17em;
+  font-weight: 700;
+  margin: 0.83em 0;
+  color: #111827;
+}
+
+.markdown-content h4 {
+  font-size: 1em;
+  font-weight: 700;
+  margin: 1em 0;
+  color: #111827;
+}
+
+.markdown-content ul,
+.markdown-content ol {
+  padding-left: 1.5em;
+  margin: 0.5em 0;
+}
+
+.markdown-content li {
+  margin: 0.25em 0;
+}
+
+.markdown-content blockquote {
+  border-left: 4px solid #10b981;
+  margin: 0.5em 0;
+  padding: 0.5em 1em;
+  background: #f0fdf4;
+  border-radius: 0 8px 8px 0;
+  color: #374151;
+}
+
+.markdown-content pre {
+  background: #f6f8fa;
+  color: #24292f;
+  padding: 16px;
+  border-radius: 8px;
+  border: 1px solid #e5e7eb;
+  overflow-x: auto;
+  margin: 0.5em 0;
+  font-family: "SF Mono", "Monaco", "Menlo", "Consolas", monospace;
+  font-size: 14px;
+  line-height: 1.6;
+}
+
+.markdown-content code {
+  background: #eff1f3;
+  color: #24292f;
+  padding: 2px 6px;
+  border-radius: 4px;
+  border: 1px solid #d1d5db;
+  font-family: "SF Mono", "Monaco", "Menlo", "Consolas", monospace;
+  font-size: 0.9em;
+}
+
+.markdown-content pre code {
+  background: transparent;
+  color: inherit;
+  padding: 0;
+  border: none;
+  border-radius: 0;
+}
+
+.markdown-content a {
+  color: #2563eb;
+  text-decoration: underline;
+}
+
+.markdown-content a:hover {
+  color: #1d4ed8;
+}
+
+.markdown-content hr {
+  border: none;
+  border-top: 2px solid #e5e7eb;
+  margin: 1.5em 0;
+}
+
+.markdown-content table {
+  border-collapse: collapse;
+  width: 100%;
+  margin: 0.5em 0;
+}
+
+.markdown-content th,
+.markdown-content td {
+  border: 1px solid #e5e7eb;
+  padding: 8px 12px;
+  text-align: left;
+}
+
+.markdown-content th {
+  background: #f9fafb;
+  font-weight: 600;
+}
