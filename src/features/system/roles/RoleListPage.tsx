@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { loadRoles, createRole, updateRole, deleteRole, assignPermissions, assignMenus, loadPermissions, loadMenus } from "../../../services/systemApi";
+import { loadRoles, createRole, updateRole, deleteRole, assignPermissions, assignMenus, loadPermissions, loadMenus, getRolePermissionIds } from "../../../services/systemApi";
 import type { RoleDetailDTO, CreateRoleRequest, PermissionDTO, MenuDTO } from "../../../shared/types/system";
 
 interface RoleListPageProps {
@@ -127,16 +127,21 @@ export function RoleListPage({ token }: RoleListPageProps) {
     setShowEditDialog(true);
   }
 
-  function openAssignPermissionsDialog(role: RoleDetailDTO) {
+  async function openAssignPermissionsDialog(role: RoleDetailDTO) {
     setSelectedRole(role);
-    // TODO: 需要从后端获取角色已有的权限ID列表
-    setSelectedPermissionIds([]);
+    try {
+      const permissionIds = await getRolePermissionIds(role.id);
+      setSelectedPermissionIds(permissionIds);
+    } catch (error) {
+      console.error("获取角色权限失败:", error);
+      setSelectedPermissionIds([]);
+    }
     setShowAssignPermissionsDialog(true);
   }
 
-  function openAssignMenusDialog(role: RoleDetailDTO) {
+  async function openAssignMenusDialog(role: RoleDetailDTO) {
     setSelectedRole(role);
-    // TODO: 需要从后端获取角色已有的菜单ID列表
+    // 菜单ID获取暂未实现，使用空数组
     setSelectedMenuIds([]);
     setShowAssignMenusDialog(true);
   }

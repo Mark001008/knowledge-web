@@ -127,6 +127,10 @@ export async function assignPermissions(roleId: number, permissionIds: number[])
   });
 }
 
+export async function getRolePermissionIds(roleId: number): Promise<number[]> {
+  return request<number[]>(`${API_BASE}/roles/${roleId}/permissions`);
+}
+
 export async function assignMenus(roleId: number, menuIds: number[]): Promise<void> {
   return request<void>(`${API_BASE}/roles/${roleId}/menus`, {
     method: "PUT",
