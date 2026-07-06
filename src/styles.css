@@ -807,13 +807,14 @@ td {
   display: grid;
   grid-template-columns: 240px minmax(360px, 1fr) 320px;
   gap: 14px;
-  align-items: stretch;
+  height: calc(100vh - 200px);
 }
 
 .session-panel,
 .chat-panel,
 .citation-panel {
-  min-height: 620px;
+  min-height: 0;
+  overflow-y: auto;
 }
 
 .session-item.active {

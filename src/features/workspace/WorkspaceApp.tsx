@@ -846,11 +846,6 @@ function SpaceDetail({
           <h3>{space.name}</h3>
           <p>{space.description || "暂无描述"}</p>
         </div>
-        <div className="rag-settings">
-          <span>TopK <strong>{space.topK}</strong></span>
-          <span>阈值 <strong>{space.threshold.toFixed(2)}</strong></span>
-          <span>温度 <strong>{space.temperature.toFixed(2)}</strong></span>
-        </div>
       </section>
 
       <div className="tabs" role="tablist">
@@ -1639,6 +1634,14 @@ function ChatTab({
   const session = space.sessions.find((item) => item.id === activeSessionId) || space.sessions[0];
   const [editingSessionId, setEditingSessionId] = useState<number | null>(null);
   const [editTitle, setEditTitle] = useState("");
+  const messageListRef = useRef<HTMLDivElement>(null);
+
+  // 消息更新时自动滚动到底部
+  useEffect(() => {
+    if (messageListRef.current) {
+      messageListRef.current.scrollTop = messageListRef.current.scrollHeight;
+    }
+  }, [session?.messages]);
 
   function handleStartRename(sessionId: number, currentTitle: string) {
     setEditingSessionId(sessionId);
@@ -1724,7 +1727,7 @@ function ChatTab({
       </aside>
 
       <section className="surface chat-panel">
-        <div className="message-list">
+        <div className="message-list" ref={messageListRef}>
           {session?.messages.map((message, messageIndex) => (
             <article className={`message ${message.role}`} key={`${message.role}-${messageIndex}`}>
               {message.role === "assistant" ? (
@@ -1768,7 +1771,7 @@ function ChatTab({
               <span className="pill">分片 {citation.chunkIndex}</span>
               <span className="pill success">相似度 {citation.score.toFixed(6)}</span>
             </div>
-            <div className="quote-box">{citation.quoteText}</div>
+            <MarkdownRenderer content={citation.quoteText} className="quote-box" />
           </article>
         ) : (
           <EmptyState title="暂无引用" text="点击回答中的引用标签后，这里会展示原文片段。" compact />
