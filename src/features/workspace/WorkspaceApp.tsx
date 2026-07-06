@@ -16,6 +16,7 @@ import {
   deleteKnowledgeSpace,
   getDocumentContent,
   loadKnowledgeSpace,
+  loadSpaceDetail,
   loadWorkspace,
   reindexDocument,
   removeSpaceMember,
@@ -113,11 +114,11 @@ export function WorkspaceApp({ token, user, permissions, menus, onLogout }: Work
   const hasPermission = (code: string) => permissions.includes(code);
   const hasAnyPermission = (codes: string[]) => codes.some(code => permissions.includes(code));
   const activeSpace = spaces.find((space) => space.id === activeSpaceId) || null;
-  const activeSession = activeSpace?.sessions.find((session) => session.id === activeSessionId) || activeSpace?.sessions[0] || null;
-  const allDocuments = useMemo(() => spaces.flatMap((space) => space.documents), [spaces]);
+  const activeSession = activeSpace?.sessions?.find((session) => session.id === activeSessionId) || activeSpace?.sessions?.[0] || null;
+  const allDocuments = useMemo(() => spaces.flatMap((space) => space.documents ?? []), [spaces]);
   const processingDocuments = allDocuments.filter((doc) => isProcessingStatus(doc.status));
   const recentSessions = spaces
-    .flatMap((space) => space.sessions.map((session) => ({ ...session, spaceId: space.id, spaceName: space.name })))
+    .flatMap((space) => (space.sessions ?? []).map((session) => ({ ...session, spaceId: space.id, spaceName: space.name })))
     .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
   const filteredSpaces = spaces.filter((space) => {
     const query = keyword.trim().toLowerCase();
@@ -166,14 +167,25 @@ export function WorkspaceApp({ token, user, permissions, menus, onLogout }: Work
     setCitation(null);
   }
 
-  function openSpace(spaceId: number, tab: DetailTab = "documents", sessionId?: number) {
+  async function openSpace(spaceId: number, tab: DetailTab = "documents", sessionId?: number) {
     const nextSpace = spaces.find((space) => space.id === spaceId);
     setRoute("spaces");
     setActiveSpaceId(spaceId);
     setActiveTab(tab);
-    setActiveSessionId(sessionId || nextSpace?.sessions[0]?.id || null);
+    setActiveSessionId(sessionId || nextSpace?.sessions?.[0]?.id || null);
     setDocumentPage(null);
     setCitation(null);
+
+    // 延迟加载：如果空间详情未加载，则加载
+    if (nextSpace && !nextSpace.loaded) {
+      try {
+        const detail = await loadSpaceDetail(token, spaceId);
+        setSpaces((current) => current.map((s) => (s.id === spaceId ? detail : s)));
+        setActiveSessionId((prev) => prev || detail.sessions?.[0]?.id || null);
+      } catch (error) {
+        setApiError(errorMessage(error));
+      }
+    }
   }
 
   function closeDocumentPage() {
@@ -188,7 +200,7 @@ export function WorkspaceApp({ token, user, permissions, menus, onLogout }: Work
 
   function replaceSpace(nextSpace: KnowledgeSpace) {
     setSpaces((current) => current.map((space) => (space.id === nextSpace.id ? nextSpace : space)));
-    setActiveSessionId((current) => (current && nextSpace.sessions.some((session) => session.id === current) ? current : nextSpace.sessions[0]?.id || null));
+    setActiveSessionId((current) => (current && (nextSpace.sessions ?? []).some((session) => session.id === current) ? current : nextSpace.sessions?.[0]?.id || null));
   }
 
   async function createSpace() {
@@ -288,7 +300,7 @@ export function WorkspaceApp({ token, user, permissions, menus, onLogout }: Work
     setApiError("");
     try {
       const session = await runBusy("create-session", () => createChatSession(token, activeSpace.id));
-      updateActiveSpace((space) => ({ ...space, sessions: [session, ...space.sessions] }));
+      updateActiveSpace((space) => ({ ...space, sessions: [session, ...(space.sessions ?? [])] }));
       setActiveSessionId(session.id);
       setCitation(null);
       return session;
@@ -305,7 +317,7 @@ export function WorkspaceApp({ token, user, permissions, menus, onLogout }: Work
       await updateChatSession(token, sessionId, newTitle);
       updateActiveSpace((space) => ({
         ...space,
-        sessions: space.sessions.map((item) =>
+        sessions: (space.sessions ?? []).map((item) =>
           item.id === sessionId ? { ...item, title: newTitle } : item
         )
       }));
@@ -322,7 +334,7 @@ export function WorkspaceApp({ token, user, permissions, menus, onLogout }: Work
       await deleteChatSession(token, sessionId);
       updateActiveSpace((space) => ({
         ...space,
-        sessions: space.sessions.filter((item) => item.id !== sessionId)
+        sessions: (space.sessions ?? []).filter((item) => item.id !== sessionId)
       }));
       if (activeSessionId === sessionId) {
         setActiveSessionId(null);
@@ -347,7 +359,7 @@ export function WorkspaceApp({ token, user, permissions, menus, onLogout }: Work
     setApiError("");
     updateActiveSpace((space) => ({
       ...space,
-      sessions: space.sessions.map((item) =>
+      sessions: (space.sessions ?? []).map((item) =>
         item.id === session.id ? { ...item, messages: [...item.messages, { role: "user", content: input }], updatedAt: "刚刚" } : item
       )
     }));
@@ -356,7 +368,7 @@ export function WorkspaceApp({ token, user, permissions, menus, onLogout }: Work
       const answer = await runBusy("send-question", () => sendChatMessage(token, session.id, input));
       updateActiveSpace((space) => ({
         ...space,
-        sessions: space.sessions.map((item) =>
+        sessions: (space.sessions ?? []).map((item) =>
           item.id === session.id ? { ...item, messages: [...item.messages, answer], updatedAt: "刚刚" } : item
         )
       }));
@@ -452,7 +464,7 @@ export function WorkspaceApp({ token, user, permissions, menus, onLogout }: Work
     setApiError("");
     try {
       await runBusy(`delete-document-${documentId}`, () => deleteDocument(token, documentId));
-      updateActiveSpace((space) => ({ ...space, documents: space.documents.filter((doc) => doc.id !== documentId) }));
+      updateActiveSpace((space) => ({ ...space, documents: (space.documents ?? []).filter((doc) => doc.id !== documentId) }));
     } catch (error) {
       setApiError(errorMessage(error));
     }
@@ -465,7 +477,7 @@ export function WorkspaceApp({ token, user, permissions, menus, onLogout }: Work
       await runBusy(`reindex-document-${documentId}`, () => reindexDocument(token, documentId));
       updateActiveSpace((space) => ({
         ...space,
-        documents: space.documents.map((doc) => (doc.id === documentId ? { ...doc, status: "PENDING", errorMessage: "", updatedAt: "刚刚" } : doc))
+        documents: (space.documents ?? []).map((doc) => (doc.id === documentId ? { ...doc, status: "PENDING", errorMessage: "", updatedAt: "刚刚" } : doc))
       }));
     } catch (error) {
       setApiError(errorMessage(error));
@@ -751,8 +763,8 @@ function WorkspaceHome({
               </div>
               <p>{space.description || "暂无描述"}</p>
               <div className="card-meta">
-                <span>{space.documents.length} 个文档</span>
-                <span>{space.sessions.length} 个会话</span>
+                <span>{space.documentCount ?? space.documents?.length ?? 0} 个文档</span>
+                <span>{space.sessionCount ?? space.sessions?.length ?? 0} 个会话</span>
                 <span>{space.updatedAt}</span>
               </div>
               <button className="secondary-btn full-width" type="button" onClick={() => onOpenSpace(space.id)}>
@@ -900,7 +912,7 @@ function SummaryCard({ label, value, tone = "default" }: { label: string; value:
 
 function ProcessingPanel({ spaces }: { spaces: KnowledgeSpace[] }) {
   const items = spaces.flatMap((space) =>
-    space.documents
+    (space.documents ?? [])
       .filter((doc) => doc.status !== "COMPLETED")
       .map((doc) => ({
         ...doc,
@@ -985,7 +997,7 @@ function DocumentsTab({
   const [docKeyword, setDocKeyword] = useState("");
   const hasPermission = (code: string) => permissions.includes(code);
 
-  const filteredDocs = space.documents.filter((doc) => {
+  const filteredDocs = (space.documents ?? []).filter((doc) => {
     const query = docKeyword.trim().toLowerCase();
     return !query || doc.fileName.toLowerCase().includes(query) || doc.uploadedBy.toLowerCase().includes(query);
   });
@@ -1030,7 +1042,7 @@ function DocumentsTab({
             </button>
           )}
         </div>
-        <span className="doc-count">{filteredDocs.length} / {space.documents.length} 个文档</span>
+        <span className="doc-count">{filteredDocs.length} / {(space.documents ?? []).length} 个文档</span>
       </div>
       <div className="table-wrap">
         <table>
@@ -1088,7 +1100,7 @@ function DocumentsTab({
                 </tr>
               );
             })}
-            {!space.documents.length ? (
+            {!(space.documents ?? []).length ? (
               <tr>
                 <td colSpan={7}>
                   <EmptyState title="暂无文档" text="把制度、手册、方案或 FAQ 上传到这里，后续即可围绕资料提问。" compact />
@@ -1197,11 +1209,6 @@ function DocumentReadPage({
           </div>
         </div>
         <div className="inline-actions">
-          {page.editable ? (
-            <button className="primary-btn" type="button" onClick={onEdit}>
-              编辑文档
-            </button>
-          ) : null}
           <button className="secondary-btn" type="button" onClick={onBack}>
             返回列表
           </button>
@@ -1612,7 +1619,7 @@ function ChatTab({
   onSelectCitation: (citation: Citation) => void;
   citation: Citation | null;
 }) {
-  const session = space.sessions.find((item) => item.id === activeSessionId) || space.sessions[0];
+  const session = (space.sessions ?? []).find((item) => item.id === activeSessionId) || space.sessions?.[0];
   const [editingSessionId, setEditingSessionId] = useState<number | null>(null);
   const [editTitle, setEditTitle] = useState("");
   const messageListRef = useRef<HTMLDivElement>(null);
@@ -1652,7 +1659,7 @@ function ChatTab({
           </button>
         </div>
         <div className="session-list">
-          {space.sessions.map((item) => (
+          {(space.sessions ?? []).map((item) => (
             <div key={item.id} className={`session-item-wrapper ${item.id === session?.id ? "active" : ""}`}>
               {editingSessionId === item.id ? (
                 <div className="session-edit-row">
@@ -1703,7 +1710,7 @@ function ChatTab({
               )}
             </div>
           ))}
-          {!space.sessions.length ? <EmptyState title="暂无会话" text="新建会话后，可以围绕当前知识库资料提问。" compact /> : null}
+          {!(space.sessions ?? []).length ? <EmptyState title="暂无会话" text="新建会话后，可以围绕当前知识库资料提问。" compact /> : null}
         </div>
       </aside>
 
@@ -1800,7 +1807,7 @@ function MembersTab({
         </button>
       </form>
       <div className="member-grid">
-        {space.members.map((member) => {
+        {(space.members ?? []).map((member) => {
           const removing = busyActions.has(`remove-member-${member.id}`);
           return (
             <article className="member-card" key={member.id}>
@@ -1820,7 +1827,7 @@ function MembersTab({
             </article>
           );
         })}
-        {!space.members.length ? <EmptyState title="暂无成员" text="当前知识库还没有可展示的成员。" compact /> : null}
+        {!(space.members ?? []).length ? <EmptyState title="暂无成员" text="当前知识库还没有可展示的成员。" compact /> : null}
       </div>
     </section>
   );

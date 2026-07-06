@@ -13,8 +13,9 @@ import type {
   UserDTO
 } from "../shared/types/system";
 import { requireFreshLogin } from "./authSession";
+import { appConfig } from "../config/appConfig";
 
-const API_BASE = "/api/system";
+const API_BASE = `${appConfig.apiBaseUrl}/api/system`;
 
 async function request<T>(url: string, options?: RequestInit): Promise<T> {
   const token =

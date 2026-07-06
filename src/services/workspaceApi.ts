@@ -115,7 +115,12 @@ async function request<T>(token: string, path: string, options: RequestInit = {}
 
 export async function loadWorkspace(token: string): Promise<KnowledgeSpace[]> {
   const spaces = await request<SpaceVO[]>(token, "/api/spaces");
-  return Promise.all(spaces.map((space) => hydrateSpace(token, space)));
+  return spaces.map(toSpaceSummary);
+}
+
+export async function loadSpaceDetail(token: string, spaceId: number): Promise<KnowledgeSpace> {
+  const space = await request<SpaceVO>(token, `/api/spaces/${spaceId}`);
+  return hydrateSpace(token, space);
 }
 
 export async function loadKnowledgeSpace(token: string, spaceId: number) {
@@ -280,6 +285,21 @@ async function listMembers(token: string, spaceId: number) {
   return members.map(toMember);
 }
 
+function toSpaceSummary(space: SpaceVO): KnowledgeSpace {
+  return {
+    id: space.id,
+    name: space.name,
+    description: space.description || "",
+    visibility: space.visibility,
+    topK: space.topK,
+    threshold: Number(space.similarityThreshold ?? 0.7),
+    temperature: Number(space.temperature ?? 0.2),
+    updatedAt: formatTime(space.updatedAt),
+    documentCount: space.documentCount ?? 0,
+    loaded: false
+  };
+}
+
 function toKnowledgeSpace(space: SpaceVO, documents: KnowledgeDocument[], members: Member[], sessions: ChatSession[]): KnowledgeSpace {
   return {
     id: space.id,
@@ -292,7 +312,10 @@ function toKnowledgeSpace(space: SpaceVO, documents: KnowledgeDocument[], member
     updatedAt: formatTime(space.updatedAt),
     members,
     documents,
-    sessions
+    sessions,
+    documentCount: documents.length,
+    sessionCount: sessions.length,
+    loaded: true
   };
 }
 

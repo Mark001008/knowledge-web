@@ -71,7 +71,10 @@ export interface KnowledgeSpace {
   threshold: number;
   temperature: number;
   updatedAt: string;
-  members: Member[];
-  documents: KnowledgeDocument[];
-  sessions: ChatSession[];
+  members?: Member[];
+  documents?: KnowledgeDocument[];
+  sessions?: ChatSession[];
+  documentCount?: number;
+  sessionCount?: number;
+  loaded?: boolean;
 }
