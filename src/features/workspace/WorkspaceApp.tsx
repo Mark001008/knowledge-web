@@ -513,19 +513,6 @@ export function WorkspaceApp({ token, user, permissions, menus, onLogout }: Work
       ) : null}
 
       <section className={editingDocument ? "workspace document-workspace" : "workspace"}>
-        {!editingDocument ? (
-        <header className="topbar">
-          <div>
-            <p className="eyebrow">MarkVerse</p>
-            <h2>{title}</h2>
-          </div>
-          {activeSpace ? (
-            <button className="secondary-btn" type="button" onClick={documentPage ? closeDocumentPage : () => setActiveSpaceId(null)}>
-              {documentPage ? "返回文档列表" : "返回知识库"}
-            </button>
-          ) : null}
-        </header>
-        ) : null}
 
         {apiError ? <div className="notice error">{apiError}</div> : null}
         {loading ? <EmptyState title="正在加载知识库数据" text="正在读取当前账号可访问的知识库、文档和会话。" /> : null}
@@ -840,14 +827,6 @@ function SpaceDetail({
   const hasPermission = (code: string) => permissions.includes(code);
   return (
     <section className="page-stack">
-      <section className="surface detail-hero">
-        <div>
-          <p className="eyebrow">{visibilityLabel(space.visibility)}</p>
-          <h3>{space.name}</h3>
-          <p>{space.description || "暂无描述"}</p>
-        </div>
-      </section>
-
       <div className="tabs" role="tablist">
         {[
           ["documents", "文档"],
@@ -861,49 +840,51 @@ function SpaceDetail({
         ))}
       </div>
 
-      {activeTab === "documents" ? (
-        <DocumentsTab
-          space={space}
-          uploading={busyActions.has(`upload-${space.id}`)}
-          refreshing={busyActions.has("refresh-space")}
-          busyActions={busyActions}
-          permissions={permissions}
-          onUpload={onUpload}
-          onCreateOnlineDocument={onCreateOnlineDocument}
-          onViewDocument={onViewDocument}
-          onEditOnlineDocument={onEditOnlineDocument}
-          onDelete={onDeleteDocument}
-          onReindex={onReindexDocument}
-          onRefresh={onRefresh}
-        />
-      ) : null}
-      {activeTab === "chat" ? (
-        <ChatTab
-          space={space}
-          activeSessionId={activeSessionId}
-          creatingSession={busyActions.has("create-session")}
-          sending={busyActions.has("send-question")}
-          onSelectSession={onSelectSession}
-          onCreateSession={onCreateSession}
-          onRenameSession={onRenameSession}
-          onDeleteSession={onDeleteSession}
-          onSubmitQuestion={onSubmitQuestion}
-          onSelectCitation={onSelectCitation}
-          citation={citation}
-        />
-      ) : null}
-      {activeTab === "members" ? (
-        <MembersTab space={space} adding={busyActions.has("add-member")} busyActions={busyActions} onAddMember={onAddMember} onRemoveMember={onRemoveMember} />
-      ) : null}
-      {activeTab === "settings" ? (
-        <SettingsTab
-          space={space}
-          saving={busyActions.has("save-settings")}
-          deleting={busyActions.has("delete-space")}
-          onSubmit={onSubmitSettings}
-          onDelete={onDeleteSpace}
-        />
-      ) : null}
+      <div className="tab-content">
+        {activeTab === "documents" ? (
+          <DocumentsTab
+            space={space}
+            uploading={busyActions.has(`upload-${space.id}`)}
+            refreshing={busyActions.has("refresh-space")}
+            busyActions={busyActions}
+            permissions={permissions}
+            onUpload={onUpload}
+            onCreateOnlineDocument={onCreateOnlineDocument}
+            onViewDocument={onViewDocument}
+            onEditOnlineDocument={onEditOnlineDocument}
+            onDelete={onDeleteDocument}
+            onReindex={onReindexDocument}
+            onRefresh={onRefresh}
+          />
+        ) : null}
+        {activeTab === "chat" ? (
+          <ChatTab
+            space={space}
+            activeSessionId={activeSessionId}
+            creatingSession={busyActions.has("create-session")}
+            sending={busyActions.has("send-question")}
+            onSelectSession={onSelectSession}
+            onCreateSession={onCreateSession}
+            onRenameSession={onRenameSession}
+            onDeleteSession={onDeleteSession}
+            onSubmitQuestion={onSubmitQuestion}
+            onSelectCitation={onSelectCitation}
+            citation={citation}
+          />
+        ) : null}
+        {activeTab === "members" ? (
+          <MembersTab space={space} adding={busyActions.has("add-member")} busyActions={busyActions} onAddMember={onAddMember} onRemoveMember={onRemoveMember} />
+        ) : null}
+        {activeTab === "settings" ? (
+          <SettingsTab
+            space={space}
+            saving={busyActions.has("save-settings")}
+            deleting={busyActions.has("delete-space")}
+            onSubmit={onSubmitSettings}
+            onDelete={onDeleteSpace}
+          />
+        ) : null}
+      </div>
     </section>
   );
 }

@@ -36,9 +36,12 @@ export function LoginPage({ onLogin }: LoginPageProps) {
     <main className="login-shell">
       <section className="login-card" aria-label="MarkVerse 登录">
         <aside className="login-intro">
-          <div className="login-brand">
-            <span className="brand-mark">KB</span>
-            <span>MarkVerse</span>
+          <div className="login-brand-group">
+            <div className="login-brand">
+              <span className="brand-mark">KB</span>
+              <span>MarkVerse</span>
+            </div>
+            <p className="login-tagline">Connect Everything, Remember Everything.</p>
           </div>
         </aside>
 
