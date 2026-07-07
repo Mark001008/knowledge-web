@@ -44,14 +44,18 @@ export function RoleListPage({ token }: RoleListPageProps) {
   async function loadData() {
     try {
       setLoading(true);
-      const [rolesData, permissionsData, menusData] = await Promise.all([
+      const [rolesResult, permissionsResult, menusResult] = await Promise.allSettled([
         loadRoles(),
         loadPermissions(),
         loadMenus()
       ]);
-      setRoles(rolesData);
-      setPermissions(permissionsData);
-      setMenus(menusData);
+      if (rolesResult.status === "fulfilled") setRoles(rolesResult.value);
+      if (permissionsResult.status === "fulfilled") setPermissions(permissionsResult.value);
+      if (menusResult.status === "fulfilled") setMenus(menusResult.value);
+      const failed = [rolesResult, permissionsResult, menusResult].filter(r => r.status === "rejected");
+      if (failed.length > 0) {
+        setNotice({ tone: "error", title: "部分数据加载失败", message: "某些功能可能不可用，请检查权限或稍后重试" });
+      }
     } catch (error) {
       setNotice({ tone: "error", title: "加载数据失败", message: toErrorMessage(error, "请稍后重试") });
     } finally {

@@ -77,12 +77,16 @@ export function UserListPage({ token }: UserListPageProps) {
   async function loadData() {
     try {
       setLoading(true);
-      const [usersData, rolesData] = await Promise.all([
+      const [usersResult, rolesResult] = await Promise.allSettled([
         loadUsers(),
         loadRoles()
       ]);
-      setUsers(usersData);
-      setRoles(rolesData);
+      if (usersResult.status === "fulfilled") setUsers(usersResult.value);
+      if (rolesResult.status === "fulfilled") setRoles(rolesResult.value);
+      const failed = [usersResult, rolesResult].filter(r => r.status === "rejected");
+      if (failed.length > 0) {
+        setNotice({ tone: "error", title: "部分数据加载失败", message: "某些功能可能不可用，请检查权限或稍后重试" });
+      }
     } catch (error) {
       setNotice({ tone: "error", title: "加载数据失败", message: toErrorMessage(error, "请稍后重试") });
     } finally {
