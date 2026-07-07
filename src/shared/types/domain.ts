@@ -25,15 +25,41 @@ export interface Citation {
   documentName: string;
   chunkId: number;
   pageNumber: number | null;
-  chunkIndex: number;
+  chunkIndex: number | null;
   score: number;
   quoteText: string;
 }
 
+export interface IndexHealth {
+  totalDocuments: number;
+  completedDocuments: number;
+  processingDocuments: number;
+  failedDocuments: number;
+  chunkCount: number;
+  vectorEnabled: boolean;
+  lastIndexedAt: string | null;
+}
+
+export interface RetrievalDiagnostics {
+  hitCount: number;
+  bestScore: number;
+  threshold: number;
+  topK: number;
+  retrievalMode: string;
+  keywordFallbackUsed: boolean;
+  enteredPrompt: boolean;
+  lowConfidence: boolean;
+  noAnswerReason: string;
+  explanation: string;
+  indexHealth: IndexHealth | null;
+}
+
 export interface ChatMessage {
+  id?: number;
   role: "user" | "assistant";
   content: string;
   citations?: Citation[];
+  diagnostics?: RetrievalDiagnostics | null;
 }
 
 export interface ChatSession {
@@ -52,6 +78,7 @@ export interface KnowledgeDocument {
   status: DocumentStatus;
   updatedAt: string;
   errorMessage: string;
+  chunkCount: number;
 }
 
 export interface Member {
@@ -76,5 +103,6 @@ export interface KnowledgeSpace {
   sessions?: ChatSession[];
   documentCount?: number;
   sessionCount?: number;
+  indexHealth?: IndexHealth | null;
   loaded?: boolean;
 }

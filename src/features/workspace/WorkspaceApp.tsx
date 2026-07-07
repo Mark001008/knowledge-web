@@ -15,6 +15,7 @@ import {
   deleteChatSession,
   deleteDocument,
   deleteKnowledgeSpace,
+  diagnoseChatQuery,
   downloadOriginalDocument,
   getDocumentContent,
   listRecentSessions,
@@ -23,14 +24,15 @@ import {
   loadWorkspace,
   reindexDocument,
   removeSpaceMember,
-  sendChatMessage,
+  streamChatMessage,
+  submitChatFeedback,
   updateChatSession,
   updateDocumentContent,
   updateKnowledgeSpace,
   uploadDocument
 } from "../../services/workspaceApi";
 import { statusClass, statusLabel } from "../../shared/status";
-import type { ChatMessage, Citation, DetailTab, DocumentStatus, KnowledgeDocument, KnowledgeSpace, RouteKey, UserInfo } from "../../shared/types/domain";
+import type { ChatMessage, Citation, DetailTab, DocumentStatus, KnowledgeDocument, KnowledgeSpace, RetrievalDiagnostics, RouteKey, UserInfo } from "../../shared/types/domain";
 import type { MenuDTO, UserDTO } from "../../shared/types/system";
 import { UserListPage } from "../system/users/UserListPage";
 import { RoleListPage } from "../system/roles/RoleListPage";
@@ -55,6 +57,7 @@ type BusyAction =
   | "add-member"
   | "create-session"
   | "send-question"
+  | "diagnose-question"
   | "create-online-document"
   | "save-online-document"
   | `upload-${number}`
@@ -73,6 +76,7 @@ const busyText: Partial<Record<BusyAction, string>> = {
   "add-member": "添加中",
   "create-session": "新建中",
   "send-question": "发送中",
+  "diagnose-question": "诊断中",
   "create-online-document": "创建中",
   "save-online-document": "保存中"
 };
@@ -457,24 +461,92 @@ export function WorkspaceApp({ token, user, permissions, menus, onLogout }: Work
 
     form.reset();
     setApiError("");
+    const draftAssistantId = -Date.now();
     updateActiveSpace((space) => ({
       ...space,
       sessions: (space.sessions ?? []).map((item) =>
-        item.id === session.id ? { ...item, messages: [...item.messages, { role: "user", content: input }], updatedAt: "刚刚" } : item
+        item.id === session.id
+          ? {
+              ...item,
+              messages: [
+                ...item.messages,
+                { role: "user", content: input },
+                { id: draftAssistantId, role: "assistant", content: "", citations: [], diagnostics: null }
+              ],
+              updatedAt: "刚刚"
+            }
+          : item
       )
     }));
 
     try {
-      const answer = await runBusy("send-question", () => sendChatMessage(token, session.id, input));
+      const answer = await runBusy("send-question", () =>
+        streamChatMessage(token, session.id, input, {
+          onDelta: (delta) => {
+            updateActiveSpace((space) => ({
+              ...space,
+              sessions: (space.sessions ?? []).map((item) =>
+                item.id === session.id
+                  ? {
+                      ...item,
+                      messages: item.messages.map((message) =>
+                        message.id === draftAssistantId ? { ...message, content: `${message.content}${delta}` } : message
+                      ),
+                      updatedAt: "刚刚"
+                    }
+                  : item
+              )
+            }));
+          }
+        })
+      );
       updateActiveSpace((space) => ({
         ...space,
         sessions: (space.sessions ?? []).map((item) =>
-          item.id === session.id ? { ...item, messages: [...item.messages, answer], updatedAt: "刚刚" } : item
+          item.id === session.id
+            ? {
+                ...item,
+                messages: item.messages.map((message) => (message.id === draftAssistantId ? answer : message)),
+                updatedAt: "刚刚"
+              }
+            : item
         )
       }));
     } catch (error) {
+      updateActiveSpace((space) => ({
+        ...space,
+        sessions: (space.sessions ?? []).map((item) =>
+          item.id === session.id
+            ? {
+                ...item,
+                messages: item.messages.map((message) =>
+                  message.id === draftAssistantId
+                    ? { ...message, content: message.content || "流式问答失败，请稍后重试。" }
+                    : message
+                )
+              }
+            : item
+        )
+      }));
       setApiError(errorMessage(error));
     }
+  }
+
+  async function sendFeedback(message: ChatMessage, rating: string, reason = "") {
+    if (!message.id) {
+      setApiError("这条历史回答缺少消息编号，暂时无法提交反馈");
+      return;
+    }
+    setApiError("");
+    try {
+      await submitChatFeedback(token, message.id, rating, reason);
+    } catch (error) {
+      setApiError(errorMessage(error));
+    }
+  }
+
+  async function diagnoseQuestion(spaceId: number, question: string) {
+    return runBusy("diagnose-question", () => diagnoseChatQuery(token, spaceId, question));
   }
 
   async function addDocument(file: File) {
@@ -704,6 +776,8 @@ export function WorkspaceApp({ token, user, permissions, menus, onLogout }: Work
             onRenameSession={renameSession}
             onDeleteSession={removeSession}
             onSubmitQuestion={sendQuestion}
+            onDiagnoseQuestion={diagnoseQuestion}
+            onFeedback={sendFeedback}
             onSelectCitation={setCitation}
             onAddMember={addMember}
             onRemoveMember={removeMember}
@@ -938,6 +1012,8 @@ function SpaceDetail({
   onRenameSession,
   onDeleteSession,
   onSubmitQuestion,
+  onDiagnoseQuestion,
+  onFeedback,
   onSelectCitation,
   onAddMember,
   onRemoveMember,
@@ -967,6 +1043,8 @@ function SpaceDetail({
   onRenameSession: (sessionId: number, newTitle: string) => void;
   onDeleteSession: (sessionId: number) => void;
   onSubmitQuestion: (event: FormEvent<HTMLFormElement>) => void;
+  onDiagnoseQuestion: (spaceId: number, question: string) => Promise<ChatMessage>;
+  onFeedback: (message: ChatMessage, rating: string, reason?: string) => void;
   onSelectCitation: (citation: Citation) => void;
   onAddMember: (event: FormEvent<HTMLFormElement>) => void;
   onRemoveMember: (memberId: number) => void;
@@ -1014,11 +1092,14 @@ function SpaceDetail({
             activeSessionId={activeSessionId}
             creatingSession={busyActions.has("create-session")}
             sending={busyActions.has("send-question")}
+            diagnosing={busyActions.has("diagnose-question")}
             onSelectSession={onSelectSession}
             onCreateSession={onCreateSession}
             onRenameSession={onRenameSession}
             onDeleteSession={onDeleteSession}
             onSubmitQuestion={onSubmitQuestion}
+            onDiagnoseQuestion={onDiagnoseQuestion}
+            onFeedback={onFeedback}
             onSelectCitation={onSelectCitation}
             onDownloadSource={onDownloadSource}
             onViewSourceDocument={onViewDocument}
@@ -1168,6 +1249,7 @@ function DocumentsTab({
           {refreshing ? "刷新中" : "刷新状态"}
         </button>
       </div>
+      <IndexHealthPanel space={space} />
       <div className="document-create-row">
         {hasPermission("document:upload") && <UploadZone onUpload={onUpload} uploading={uploading} />}
         {hasPermission("document:create") && (
@@ -1206,6 +1288,7 @@ function DocumentsTab({
               <th>文件</th>
               <th>类型</th>
               <th>大小</th>
+              <th>分片</th>
               <th>上传人</th>
               <th>状态</th>
               <th>更新时间</th>
@@ -1233,6 +1316,7 @@ function DocumentsTab({
                   </td>
                   <td><span className={`file-type ${fileTypeClass(doc.fileType)}`}>{fileTypeLabel(doc.fileType)}</span></td>
                   <td>{doc.fileSize}</td>
+                  <td>{doc.chunkCount}</td>
                   <td>{doc.uploadedBy}</td>
                   <td><span className={`pill ${statusClass(doc.status)}`}>{statusLabel(doc.status)}</span></td>
                   <td>{doc.updatedAt}</td>
@@ -1268,13 +1352,13 @@ function DocumentsTab({
             })}
             {!(space.documents ?? []).length ? (
               <tr>
-                <td colSpan={7}>
+                <td colSpan={8}>
                   <EmptyState title="暂无文档" text="把制度、手册、方案或 FAQ 上传到这里，后续即可围绕资料提问。" compact />
                 </td>
               </tr>
             ) : !filteredDocs.length ? (
               <tr>
-                <td colSpan={7}>
+                <td colSpan={8}>
                   <EmptyState title="没有匹配的文档" text={`未找到与"${docKeyword}"匹配的文档，请尝试其他关键词。`} compact />
                 </td>
               </tr>
@@ -1283,6 +1367,24 @@ function DocumentsTab({
         </table>
       </div>
     </section>
+  );
+}
+
+function IndexHealthPanel({ space }: { space: KnowledgeSpace }) {
+  const fallback = buildIndexHealthFromDocuments(space);
+  const health = space.indexHealth ?? fallback;
+  const lastIndexedAt = health.lastIndexedAt || "-";
+  return (
+    <div className="index-health-grid">
+      <SummaryCard label="已完成" value={health.completedDocuments} />
+      <SummaryCard label="处理中" value={health.processingDocuments} tone={health.processingDocuments ? "warning" : "default"} />
+      <SummaryCard label="失败" value={health.failedDocuments} tone={health.failedDocuments ? "warning" : "default"} />
+      <SummaryCard label="分片" value={health.chunkCount} />
+      <div className="index-health-note">
+        <strong>{health.vectorEnabled ? "向量库可用" : "向量库未启用"}</strong>
+        <span>最近索引：{lastIndexedAt}</span>
+      </div>
+    </div>
   );
 }
 
@@ -1782,11 +1884,14 @@ function ChatTab({
   activeSessionId,
   creatingSession,
   sending,
+  diagnosing,
   onSelectSession,
   onCreateSession,
   onRenameSession,
   onDeleteSession,
   onSubmitQuestion,
+  onDiagnoseQuestion,
+  onFeedback,
   onSelectCitation,
   onDownloadSource,
   onViewSourceDocument,
@@ -1800,11 +1905,14 @@ function ChatTab({
   activeSessionId: number | null;
   creatingSession: boolean;
   sending: boolean;
+  diagnosing: boolean;
   onSelectSession: (sessionId: number) => void;
   onCreateSession: () => void;
   onRenameSession: (sessionId: number, newTitle: string) => void;
   onDeleteSession: (sessionId: number) => void;
   onSubmitQuestion: (event: FormEvent<HTMLFormElement>) => void;
+  onDiagnoseQuestion: (spaceId: number, question: string) => Promise<ChatMessage>;
+  onFeedback: (message: ChatMessage, rating: string, reason?: string) => void;
   onSelectCitation: (citation: Citation) => void;
   onDownloadSource: (documentId: number, fileName: string) => void;
   onViewSourceDocument: (document: KnowledgeDocument) => void;
@@ -1817,8 +1925,12 @@ function ChatTab({
   const session = (space.sessions ?? []).find((item) => item.id === activeSessionId) || space.sessions?.[0];
   const noCitationNote = buildNoCitationNote(space);
   const citationDocument = citation ? (space.documents ?? []).find((doc) => doc.id === citation.documentId) : null;
+  const hasStreamingDraft = Boolean(session?.messages.some((message) => message.role === "assistant" && (message.id ?? 0) < 0));
   const [editingSessionId, setEditingSessionId] = useState<number | null>(null);
   const [editTitle, setEditTitle] = useState("");
+  const [diagnosticQuery, setDiagnosticQuery] = useState("");
+  const [diagnosticResult, setDiagnosticResult] = useState<ChatMessage | null>(null);
+  const [diagnosticOpen, setDiagnosticOpen] = useState(false);
   const messageListRef = useRef<HTMLDivElement>(null);
 
   // 消息更新时自动滚动到底部
@@ -1844,6 +1956,14 @@ function ChatTab({
   function handleCancelRename() {
     setEditingSessionId(null);
     setEditTitle("");
+  }
+
+  async function handleDiagnose(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const question = diagnosticQuery.trim();
+    if (!question || diagnosing) return;
+    const result = await onDiagnoseQuestion(space.id, question);
+    setDiagnosticResult(result);
   }
 
   return (
@@ -1920,15 +2040,59 @@ function ChatTab({
       </aside>
 
       <section className="surface chat-panel">
+        <form className={`diagnostic-panel ${diagnosticOpen ? "open" : "minimized"}`} onSubmit={handleDiagnose}>
+          <div className="diagnostic-panel-head">
+            <div>
+              <strong>查询诊断</strong>
+              <span>{diagnosticOpen ? "不写入会话，用于查看召回片段、分数、模式和是否进入 Prompt。" : diagnosticSummary(diagnosticResult)}</span>
+            </div>
+            <button
+              className="link-btn"
+              type="button"
+              onClick={() => setDiagnosticOpen((open) => !open)}
+              aria-expanded={diagnosticOpen}
+            >
+              {diagnosticOpen ? "收起" : "展开"}
+            </button>
+          </div>
+          {diagnosticOpen ? (
+            <>
+              <div className="diagnostic-input-row">
+                <input
+                  value={diagnosticQuery}
+                  onChange={(event) => setDiagnosticQuery(event.target.value)}
+                  placeholder="输入问题进行 RAG 诊断"
+                  disabled={diagnosing}
+                />
+                <button className="secondary-btn" type="submit" disabled={diagnosing || !diagnosticQuery.trim()}>
+                  {diagnosing ? "诊断中" : "诊断"}
+                </button>
+              </div>
+              {diagnosticResult?.diagnostics ? (
+                <DiagnosticDetails diagnostics={diagnosticResult.diagnostics} />
+              ) : null}
+              {diagnosticResult?.citations?.length ? (
+                <div className="diagnostic-citations">
+                  {diagnosticResult.citations.map((item) => (
+                    <button className="citation-chip" key={item.id} type="button" onClick={() => onSelectCitation(item)}>
+                      {item.documentName} · {item.score.toFixed(3)}
+                    </button>
+                  ))}
+                </div>
+              ) : null}
+            </>
+          ) : null}
+        </form>
         <div className="message-list" ref={messageListRef}>
           {session?.messages.map((message, messageIndex) => (
             <article className={`message ${message.role}`} key={`${message.role}-${messageIndex}`}>
               {message.role === "assistant" ? (
-                <MarkdownRenderer content={message.content} />
+                message.content ? <MarkdownRenderer content={message.content} /> : <strong>正在生成回答</strong>
               ) : (
                 <div>{message.content}</div>
               )}
               {message.role === "assistant" ? <RetrievalNote message={message} space={space} fallbackText={noCitationNote} /> : null}
+              {message.role === "assistant" && message.diagnostics ? <DiagnosticDetails diagnostics={message.diagnostics} compact /> : null}
               {message.citations?.length ? (
                 <div className="citation-list">
                   {message.citations.map((item) => (
@@ -1938,10 +2102,18 @@ function ChatTab({
                   ))}
                 </div>
               ) : null}
+              {message.role === "assistant" ? (
+                <div className="feedback-row">
+                  <button className="link-btn" type="button" onClick={() => onFeedback(message, "HELPFUL")}>有用</button>
+                  <button className="link-btn" type="button" onClick={() => onFeedback(message, "WRONG_ANSWER", "答非所问")}>答非所问</button>
+                  <button className="link-btn" type="button" onClick={() => onFeedback(message, "BAD_SOURCE", "来源不对")}>来源不对</button>
+                  <button className="link-btn" type="button" onClick={() => onFeedback(message, "OUTDATED", "信息过期")}>信息过期</button>
+                </div>
+              ) : null}
             </article>
           ))}
           {!session ? <EmptyState title="暂无会话" text="先新建一个会话，再询问当前知识库内容。" compact /> : null}
-          {sending ? (
+          {sending && !hasStreamingDraft ? (
             <article className="message assistant pending">
               <strong>正在检索知识库并生成回答</strong>
               <p className="message-note">会优先查找当前知识库中已完成索引的文档，并在回答后附上引用来源。</p>
@@ -1979,11 +2151,11 @@ function ChatTab({
             </div>
             <div className="card-meta">
               <span className="pill">页码 {citation.pageNumber || "-"}</span>
-              <span className="pill">分片 {citation.chunkIndex}</span>
+              <span className="pill">分片 {citation.chunkIndex ?? citation.chunkId}</span>
               <span className="pill success">相似度 {citation.score.toFixed(6)}</span>
             </div>
             <p className="citation-locator">
-              核验定位：优先查看原文第 {citation.pageNumber || "-"} 页；若原文页码不可用，可在解析文本中搜索下方引用片段或定位分片 {citation.chunkIndex}。
+              核验定位：优先查看原文第 {citation.pageNumber || "-"} 页；若原文页码不可用，可在解析文本中搜索下方引用片段或定位分片 {citation.chunkIndex ?? citation.chunkId}。
             </p>
             <MarkdownRenderer content={citation.quoteText} className="quote-box" />
           </article>
@@ -2323,6 +2495,16 @@ function RetrievalNote({
   space: KnowledgeSpace;
   fallbackText: string;
 }) {
+  const diagnostics = message.diagnostics;
+  if (diagnostics) {
+    const tone = diagnostics.lowConfidence || !diagnostics.hitCount ? "warning" : "info";
+    return (
+      <p className={`message-note ${tone}`}>
+        {diagnostics.hitCount ? "检索说明" : "无答案原因"}：{diagnostics.explanation || fallbackText}
+      </p>
+    );
+  }
+
   const citations = message.citations ?? [];
   if (!citations.length) {
     return <p className="message-note warning">无答案原因：{fallbackText}</p>;
@@ -2345,6 +2527,58 @@ function RetrievalNote({
       已命中：从 {uniqueDocuments} 个文档中找到 {citations.length} 个引用片段，最高相似度 {bestScore.toFixed(3)}。
     </p>
   );
+}
+
+function diagnosticSummary(result: ChatMessage | null) {
+  const diagnostics = result?.diagnostics;
+  if (!diagnostics) {
+    return "RAG 排障工具，默认收起；需要查看召回片段和分数时展开。";
+  }
+  return `上次诊断：${retrievalModeLabel(diagnostics.retrievalMode)}，命中 ${diagnostics.hitCount} 个片段，最高分 ${diagnostics.bestScore.toFixed(3)}。`;
+}
+
+function DiagnosticDetails({ diagnostics, compact = false }: { diagnostics: RetrievalDiagnostics; compact?: boolean }) {
+  const health = diagnostics.indexHealth;
+  return (
+    <div className={`diagnostic-details ${compact ? "compact" : ""}`}>
+      <span>模式：{retrievalModeLabel(diagnostics.retrievalMode)}</span>
+      <span>命中：{diagnostics.hitCount}</span>
+      <span>最高分：{diagnostics.bestScore.toFixed(3)}</span>
+      <span>阈值：{diagnostics.threshold.toFixed(2)}</span>
+      <span>topK：{diagnostics.topK}</span>
+      <span>{diagnostics.enteredPrompt ? "已进入 Prompt" : "未进入 Prompt"}</span>
+      {diagnostics.keywordFallbackUsed ? <span>关键词兜底</span> : null}
+      {diagnostics.lowConfidence ? <span>低置信</span> : null}
+      {health ? (
+        <span>
+          索引：完成 {health.completedDocuments} / 处理中 {health.processingDocuments} / 失败 {health.failedDocuments} / 分片 {health.chunkCount}
+        </span>
+      ) : null}
+    </div>
+  );
+}
+
+function retrievalModeLabel(mode: string) {
+  return {
+    HYBRID: "混合召回",
+    VECTOR: "向量召回",
+    KEYWORD: "关键词召回",
+    VECTOR_EMPTY: "向量无命中",
+    KEYWORD_EMPTY: "关键词无命中"
+  }[mode] || mode || "-";
+}
+
+function buildIndexHealthFromDocuments(space: KnowledgeSpace) {
+  const documents = space.documents ?? [];
+  return {
+    totalDocuments: documents.length,
+    completedDocuments: documents.filter((doc) => doc.status === "COMPLETED").length,
+    processingDocuments: documents.filter((doc) => isProcessingStatus(doc.status)).length,
+    failedDocuments: documents.filter((doc) => doc.status === "FAILED").length,
+    chunkCount: documents.reduce((sum, doc) => sum + doc.chunkCount, 0),
+    vectorEnabled: true,
+    lastIndexedAt: documents.find((doc) => doc.status === "COMPLETED")?.updatedAt ?? null
+  };
 }
 
 function isProcessingStatus(status: DocumentStatus) {
