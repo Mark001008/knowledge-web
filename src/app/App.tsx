@@ -19,6 +19,7 @@ export function App() {
   function handleLogout() {
     clearAuthSession();
     setSession(null);
+    window.history.replaceState(null, "", "/");
   }
 
   useEffect(() => {

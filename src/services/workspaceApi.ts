@@ -101,9 +101,12 @@ async function request<T>(token: string, path: string, options: RequestInit = {}
   const payload = (await response.json().catch(() => null)) as ApiResponse<T> | null;
 
   if (!response.ok) {
-    if (response.status === 401 || response.status === 403) {
+    if (response.status === 401) {
       requireFreshLogin();
       throw new Error("登录状态已过期，请重新登录");
+    }
+    if (response.status === 403) {
+      throw new Error(payload?.message || "您没有执行此操作的权限");
     }
     throw new Error(payload?.message || `请求失败，服务返回 ${response.status}`);
   }
@@ -232,9 +235,12 @@ export async function downloadOriginalDocument(token: string, documentId: number
     }
   });
   if (!response.ok) {
-    if (response.status === 401 || response.status === 403) {
+    if (response.status === 401) {
       requireFreshLogin();
       throw new Error("登录状态已过期，请重新登录");
+    }
+    if (response.status === 403) {
+      throw new Error("您没有下载此文档的权限");
     }
     throw new Error(`下载失败，服务返回 ${response.status}`);
   }

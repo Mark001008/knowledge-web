@@ -134,6 +134,21 @@ export function WorkspaceApp({ token, user, permissions, menus, onLogout }: Work
   });
   const isBusy = (action: BusyAction) => busyActions.has(action);
 
+  // 浏览器 History 集成：前进/回退支持
+  useEffect(() => {
+    window.history.replaceState({ route: "spaces" }, "", "/");
+    function handlePopState(event: PopStateEvent) {
+      const state = event.state as { route?: RouteKey } | null;
+      const restoredRoute = state?.route || "spaces";
+      setRoute(restoredRoute);
+      setActiveSpaceId(null);
+      setDocumentPage(null);
+      setCitation(null);
+    }
+    window.addEventListener("popstate", handlePopState);
+    return () => window.removeEventListener("popstate", handlePopState);
+  }, []);
+
   useEffect(() => {
     refreshWorkspace();
   }, [token]);
@@ -216,6 +231,7 @@ export function WorkspaceApp({ token, user, permissions, menus, onLogout }: Work
     setActiveSpaceId(null);
     setDocumentPage(null);
     setCitation(null);
+    window.history.pushState({ route: nextRoute }, "", `/${nextRoute}`);
   }
 
   async function openSpace(spaceId: number, tab: DetailTab = "documents", sessionId?: number) {

@@ -34,9 +34,12 @@ async function request<T>(url: string, options?: RequestInit): Promise<T> {
 
   if (!response.ok) {
     const error = await response.json().catch(() => ({}));
-    if (response.status === 401 || response.status === 403) {
+    if (response.status === 401) {
       requireFreshLogin();
       throw new Error("登录状态已过期，请重新登录");
+    }
+    if (response.status === 403) {
+      throw new Error(error.message || "您没有执行此操作的权限");
     }
     throw new Error(error.message || `HTTP ${response.status}`);
   }
