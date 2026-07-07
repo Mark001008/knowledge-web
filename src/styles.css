@@ -833,6 +833,15 @@ td {
 
 .inline-error {
   margin-top: 6px;
+  display: grid;
+  gap: 4px;
+  color: var(--danger);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.inline-error span {
+  color: var(--warning);
 }
 
 .chat-layout {
@@ -996,10 +1005,23 @@ td {
   justify-self: start;
 }
 
+.message.pending {
+  border-color: #b7ded7;
+  background: #f6fbfa;
+}
+
 .message-note {
   margin: 10px 0 0;
   color: var(--muted);
   font-size: 13px;
+}
+
+.message-note.info {
+  color: var(--info);
+}
+
+.message-note.warning {
+  color: var(--warning);
 }
 
 .citation-list {
@@ -1034,8 +1056,29 @@ td {
   margin-top: 14px;
 }
 
+.citation-card-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.citation-card-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
 .citation-card h4 {
   margin: 0 0 8px;
+}
+
+.citation-locator {
+  margin: 10px 0 0;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.6;
 }
 
 .quote-box {
@@ -1053,6 +1096,21 @@ td {
   align-items: end;
   gap: 12px;
   margin-top: 18px;
+}
+
+.member-picker {
+  gap: 8px;
+}
+
+.member-picker select {
+  margin-top: 0;
+}
+
+.helper-note {
+  margin: 10px 0 0;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.6;
 }
 
 .member-grid {
@@ -1100,6 +1158,56 @@ td {
   display: grid;
   gap: 14px;
   margin-top: 18px;
+}
+
+.field-label {
+  color: #344054;
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.answer-mode-field {
+  display: grid;
+  gap: 10px;
+}
+
+.answer-mode-options {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.mode-option {
+  display: grid;
+  gap: 6px;
+  min-height: 86px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 12px;
+  color: var(--text);
+  background: #fff;
+  text-align: left;
+}
+
+.mode-option span {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.mode-option.active {
+  border-color: rgba(23, 102, 91, 0.55);
+  background: #eef7f5;
+}
+
+.advanced-toggle {
+  justify-self: start;
+}
+
+.advanced-settings {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
 }
 
 .quiet-panel {
@@ -1969,7 +2077,9 @@ td {
   .chat-layout,
   .document-create-row,
   .member-form,
-  .member-grid {
+  .member-grid,
+  .answer-mode-options,
+  .advanced-settings {
     grid-template-columns: 1fr;
   }
 

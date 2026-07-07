@@ -41,6 +41,7 @@ import {
   IconUserCog,
   IconLoader2
 } from "@tabler/icons-react";
+import { SystemNotice, type SystemNoticeState, toErrorMessage } from "../components/SystemFeedback";
 
 interface UserListPageProps {
   token: string;
@@ -67,6 +68,7 @@ export function UserListPage({ token }: UserListPageProps) {
   });
   const [newPassword, setNewPassword] = useState("");
   const [selectedRoleIds, setSelectedRoleIds] = useState<number[]>([]);
+  const [notice, setNotice] = useState<SystemNoticeState>(null);
 
   useEffect(() => {
     loadData();
@@ -82,7 +84,7 @@ export function UserListPage({ token }: UserListPageProps) {
       setUsers(usersData);
       setRoles(rolesData);
     } catch (error) {
-      console.error("加载数据失败:", error);
+      setNotice({ tone: "error", title: "加载数据失败", message: toErrorMessage(error, "请稍后重试") });
     } finally {
       setLoading(false);
     }
@@ -93,10 +95,10 @@ export function UserListPage({ token }: UserListPageProps) {
       await createUser(formData);
       setShowCreateDialog(false);
       setFormData({ username: "", password: "", displayName: "", email: "" });
+      setNotice({ tone: "success", title: "用户已创建" });
       loadData();
     } catch (error) {
-      console.error("创建用户失败:", error);
-      alert("创建用户失败");
+      setNotice({ tone: "error", title: "创建用户失败", message: toErrorMessage(error, "请检查用户名是否重复") });
     }
   }
 
@@ -106,25 +108,25 @@ export function UserListPage({ token }: UserListPageProps) {
       await updateUser(selectedUser.id, editFormData);
       setShowEditDialog(false);
       setSelectedUser(null);
+      setNotice({ tone: "success", title: "用户已更新" });
       loadData();
     } catch (error) {
-      console.error("更新用户失败:", error);
-      alert("更新用户失败");
+      setNotice({ tone: "error", title: "更新用户失败", message: toErrorMessage(error, "请稍后重试") });
     }
   }
 
   async function handleToggleStatus(user: UserDTO) {
     const newStatus = user.status === "ENABLED" ? "DISABLED" : "ENABLED";
     if (user.username === "admin" && newStatus === "DISABLED") {
-      alert("不能禁用管理员用户");
+      setNotice({ tone: "error", title: "不能禁用管理员用户" });
       return;
     }
     try {
       await updateUserStatus(user.id, newStatus);
+      setNotice({ tone: "success", title: newStatus === "ENABLED" ? "用户已启用" : "用户已禁用" });
       loadData();
     } catch (error) {
-      console.error("更新用户状态失败:", error);
-      alert("更新用户状态失败");
+      setNotice({ tone: "error", title: "更新用户状态失败", message: toErrorMessage(error, "请稍后重试") });
     }
   }
 
@@ -135,10 +137,9 @@ export function UserListPage({ token }: UserListPageProps) {
       setShowResetPasswordDialog(false);
       setSelectedUser(null);
       setNewPassword("");
-      alert("密码重置成功");
+      setNotice({ tone: "success", title: "密码已重置" });
     } catch (error) {
-      console.error("重置密码失败:", error);
-      alert("重置密码失败");
+      setNotice({ tone: "error", title: "重置密码失败", message: toErrorMessage(error, "请检查新密码") });
     }
   }
 
@@ -148,10 +149,10 @@ export function UserListPage({ token }: UserListPageProps) {
       await assignRoles(selectedUser.id, selectedRoleIds);
       setShowAssignRolesDialog(false);
       setSelectedUser(null);
+      setNotice({ tone: "success", title: "角色已分配" });
       loadData();
     } catch (error) {
-      console.error("分配角色失败:", error);
-      alert("分配角色失败");
+      setNotice({ tone: "error", title: "分配角色失败", message: toErrorMessage(error, "请稍后重试") });
     }
   }
 
@@ -186,6 +187,7 @@ export function UserListPage({ token }: UserListPageProps) {
 
   return (
     <div className="space-y-4">
+      <SystemNotice notice={notice} onClose={() => setNotice(null)} />
       <div className="flex items-center justify-between">
         <div>
           <h2 className="text-2xl font-bold tracking-tight">用户管理</h2>

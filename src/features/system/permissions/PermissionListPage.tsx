@@ -30,6 +30,13 @@ import {
   IconLoader2,
   IconLock,
 } from "@tabler/icons-react";
+import {
+  SystemConfirmDialog,
+  SystemNotice,
+  type ConfirmState,
+  type SystemNoticeState,
+  toErrorMessage
+} from "../components/SystemFeedback";
 
 interface PermissionListPageProps {
   token: string;
@@ -70,6 +77,8 @@ export function PermissionListPage({ token }: PermissionListPageProps) {
     description: "",
     status: "ENABLED"
   });
+  const [notice, setNotice] = useState<SystemNoticeState>(null);
+  const [confirm, setConfirm] = useState<ConfirmState>(null);
 
   useEffect(() => {
     loadData();
@@ -81,7 +90,7 @@ export function PermissionListPage({ token }: PermissionListPageProps) {
       const permissionsData = await loadPermissions();
       setPermissions(permissionsData);
     } catch (error) {
-      console.error("加载数据失败:", error);
+      setNotice({ tone: "error", title: "加载数据失败", message: toErrorMessage(error, "请稍后重试") });
     } finally {
       setLoading(false);
     }
@@ -92,10 +101,10 @@ export function PermissionListPage({ token }: PermissionListPageProps) {
       await createPermission(formData);
       setShowCreateDialog(false);
       setFormData({ permissionCode: "", permissionName: "", module: "", description: "" });
+      setNotice({ tone: "success", title: "权限已创建" });
       loadData();
     } catch (error) {
-      console.error("创建权限失败:", error);
-      alert("创建权限失败");
+      setNotice({ tone: "error", title: "创建权限失败", message: toErrorMessage(error, "请检查权限编码是否重复") });
     }
   }
 
@@ -105,23 +114,32 @@ export function PermissionListPage({ token }: PermissionListPageProps) {
       await updatePermission(selectedPermission.id, editFormData);
       setShowEditDialog(false);
       setSelectedPermission(null);
+      setNotice({ tone: "success", title: "权限已更新" });
       loadData();
     } catch (error) {
-      console.error("更新权限失败:", error);
-      alert("更新权限失败");
+      setNotice({ tone: "error", title: "更新权限失败", message: toErrorMessage(error, "请稍后重试") });
     }
   }
 
-  async function handleDeletePermission(permission: PermissionDTO) {
-    if (!confirm(`确定要删除权限 "${permission.permissionName}" 吗？`)) {
-      return;
-    }
+  function handleDeletePermission(permission: PermissionDTO) {
+    setConfirm({
+      title: "删除权限",
+      description: `确定要删除权限「${permission.permissionName}」吗？删除后相关角色可能失去对应操作能力。`,
+      actionLabel: "删除",
+      onConfirm: async () => {
+        setConfirm(null);
+        await deletePermissionWithNotice(permission);
+      }
+    });
+  }
+
+  async function deletePermissionWithNotice(permission: PermissionDTO) {
     try {
       await deletePermission(permission.id);
+      setNotice({ tone: "success", title: "权限已删除" });
       loadData();
     } catch (error) {
-      console.error("删除权限失败:", error);
-      alert("删除权限失败");
+      setNotice({ tone: "error", title: "删除权限失败", message: toErrorMessage(error, "请确认权限未被角色使用") });
     }
   }
 
@@ -175,6 +193,8 @@ export function PermissionListPage({ token }: PermissionListPageProps) {
   if (!activeModule) {
     return (
       <div className="space-y-6">
+        <SystemNotice notice={notice} onClose={() => setNotice(null)} />
+        <SystemConfirmDialog confirm={confirm} onOpenChange={(open) => !open && setConfirm(null)} />
         <div className="flex items-center justify-between">
           <div>
             <h2 className="text-2xl font-bold tracking-tight">权限管理</h2>
@@ -296,6 +316,8 @@ export function PermissionListPage({ token }: PermissionListPageProps) {
   // 模块详情视图
   return (
     <div className="space-y-6">
+      <SystemNotice notice={notice} onClose={() => setNotice(null)} />
+      <SystemConfirmDialog confirm={confirm} onOpenChange={(open) => !open && setConfirm(null)} />
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-3">
           <Button

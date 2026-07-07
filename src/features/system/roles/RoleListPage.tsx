@@ -1,6 +1,13 @@
 import { useEffect, useState } from "react";
 import { loadRoles, createRole, updateRole, deleteRole, assignPermissions, assignMenus, loadPermissions, loadMenus, getRolePermissionIds } from "../../../services/systemApi";
 import type { RoleDetailDTO, CreateRoleRequest, PermissionDTO, MenuDTO } from "../../../shared/types/system";
+import {
+  SystemConfirmDialog,
+  SystemNotice,
+  type ConfirmState,
+  type SystemNoticeState,
+  toErrorMessage
+} from "../components/SystemFeedback";
 
 interface RoleListPageProps {
   token: string;
@@ -27,6 +34,8 @@ export function RoleListPage({ token }: RoleListPageProps) {
   });
   const [selectedPermissionIds, setSelectedPermissionIds] = useState<number[]>([]);
   const [selectedMenuIds, setSelectedMenuIds] = useState<number[]>([]);
+  const [notice, setNotice] = useState<SystemNoticeState>(null);
+  const [confirm, setConfirm] = useState<ConfirmState>(null);
 
   useEffect(() => {
     loadData();
@@ -44,7 +53,7 @@ export function RoleListPage({ token }: RoleListPageProps) {
       setPermissions(permissionsData);
       setMenus(menusData);
     } catch (error) {
-      console.error("加载数据失败:", error);
+      setNotice({ tone: "error", title: "加载数据失败", message: toErrorMessage(error, "请稍后重试") });
     } finally {
       setLoading(false);
     }
@@ -55,10 +64,10 @@ export function RoleListPage({ token }: RoleListPageProps) {
       await createRole(formData);
       setShowCreateDialog(false);
       setFormData({ roleCode: "", roleName: "", description: "" });
+      setNotice({ tone: "success", title: "角色已创建" });
       loadData();
     } catch (error) {
-      console.error("创建角色失败:", error);
-      alert("创建角色失败");
+      setNotice({ tone: "error", title: "创建角色失败", message: toErrorMessage(error, "请检查角色编码是否重复") });
     }
   }
 
@@ -68,42 +77,49 @@ export function RoleListPage({ token }: RoleListPageProps) {
       await updateRole(selectedRole.id, editFormData);
       setShowEditDialog(false);
       setSelectedRole(null);
+      setNotice({ tone: "success", title: "角色已更新" });
       loadData();
     } catch (error) {
-      console.error("更新角色失败:", error);
-      alert("更新角色失败");
+      setNotice({ tone: "error", title: "更新角色失败", message: toErrorMessage(error, "请稍后重试") });
     }
   }
 
-  async function handleDeleteRole(role: RoleDetailDTO) {
+  function handleDeleteRole(role: RoleDetailDTO) {
     if (role.builtin === 1) {
-      alert("内置角色不能删除");
+      setNotice({ tone: "error", title: "内置角色不能删除" });
       return;
     }
-    if (!confirm(`确定要删除角色 "${role.roleName}" 吗？`)) {
-      return;
-    }
+    setConfirm({
+      title: "删除角色",
+      description: `确定要删除角色「${role.roleName}」吗？删除后已分配该角色的用户会失去对应权限。`,
+      actionLabel: "删除",
+      onConfirm: async () => {
+        setConfirm(null);
+        await deleteRoleWithNotice(role);
+      }
+    });
+  }
+
+  async function deleteRoleWithNotice(role: RoleDetailDTO) {
     try {
       await deleteRole(role.id);
+      setNotice({ tone: "success", title: "角色已删除" });
       loadData();
     } catch (error) {
-      console.error("删除角色失败:", error);
-      alert("删除角色失败");
+      setNotice({ tone: "error", title: "删除角色失败", message: toErrorMessage(error, "请确认角色未被使用") });
     }
   }
 
   async function handleAssignPermissions() {
     if (!selectedRole) return;
     try {
-      console.log("分配权限:", selectedPermissionIds);
       await assignPermissions(selectedRole.id, selectedPermissionIds);
       setShowAssignPermissionsDialog(false);
       setSelectedRole(null);
+      setNotice({ tone: "success", title: "权限已分配" });
       loadData();
-      alert("权限分配成功！");
     } catch (error) {
-      console.error("分配权限失败:", error);
-      alert("分配权限失败");
+      setNotice({ tone: "error", title: "分配权限失败", message: toErrorMessage(error, "请稍后重试") });
     }
   }
 
@@ -113,10 +129,10 @@ export function RoleListPage({ token }: RoleListPageProps) {
       await assignMenus(selectedRole.id, selectedMenuIds);
       setShowAssignMenusDialog(false);
       setSelectedRole(null);
+      setNotice({ tone: "success", title: "菜单已分配" });
       loadData();
     } catch (error) {
-      console.error("分配菜单失败:", error);
-      alert("分配菜单失败");
+      setNotice({ tone: "error", title: "分配菜单失败", message: toErrorMessage(error, "请稍后重试") });
     }
   }
 
@@ -133,12 +149,11 @@ export function RoleListPage({ token }: RoleListPageProps) {
     setSelectedRole(role);
     try {
       const permissionIds = await getRolePermissionIds(role.id);
-      console.log("获取到的权限ID:", permissionIds);
       // 确保是数字数组
       const numericIds = permissionIds.map(id => Number(id));
       setSelectedPermissionIds(numericIds);
     } catch (error) {
-      console.error("获取角色权限失败:", error);
+      setNotice({ tone: "error", title: "获取角色权限失败", message: toErrorMessage(error, "已使用空权限列表") });
       setSelectedPermissionIds([]);
     }
     setShowAssignPermissionsDialog(true);
@@ -166,6 +181,8 @@ export function RoleListPage({ token }: RoleListPageProps) {
 
   return (
     <div className="page-container">
+      <SystemNotice notice={notice} onClose={() => setNotice(null)} />
+      <SystemConfirmDialog confirm={confirm} onOpenChange={(open) => !open && setConfirm(null)} />
       <div className="page-header">
         <h1>角色管理</h1>
         <button className="btn btn-primary" onClick={() => setShowCreateDialog(true)}>

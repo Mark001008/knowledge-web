@@ -225,6 +225,32 @@ export async function reindexDocument(token: string, documentId: number) {
   });
 }
 
+export async function downloadOriginalDocument(token: string, documentId: number, fallbackFileName: string) {
+  const response = await fetch(`${appConfig.apiBaseUrl}/api/documents/${documentId}/download`, {
+    headers: {
+      Authorization: `Bearer ${token}`
+    }
+  });
+  if (!response.ok) {
+    if (response.status === 401 || response.status === 403) {
+      requireFreshLogin();
+      throw new Error("登录状态已过期，请重新登录");
+    }
+    throw new Error(`下载失败，服务返回 ${response.status}`);
+  }
+
+  const blob = await response.blob();
+  const fileName = getDownloadFileName(response.headers.get("Content-Disposition")) || fallbackFileName;
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = fileName;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
+}
+
 export async function createChatSession(token: string, spaceId: number, title = "新会话") {
   const session = await request<ChatSessionVO>(token, `/api/spaces/${spaceId}/chat/sessions`, {
     method: "POST",
@@ -377,6 +403,16 @@ function toCitation(citation: CitationDTO): Citation {
     score: Number(citation.score),
     quoteText: citation.quoteText
   };
+}
+
+function getDownloadFileName(contentDisposition: string | null) {
+  if (!contentDisposition) return "";
+  const utf8Match = /filename\*=UTF-8''([^;]+)/i.exec(contentDisposition);
+  if (utf8Match?.[1]) {
+    return decodeURIComponent(utf8Match[1]);
+  }
+  const asciiMatch = /filename="?([^";]+)"?/i.exec(contentDisposition);
+  return asciiMatch?.[1] || "";
 }
 
 function roleLabel(role: string) {

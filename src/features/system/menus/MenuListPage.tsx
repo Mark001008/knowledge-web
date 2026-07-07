@@ -1,6 +1,13 @@
 import { useEffect, useState } from "react";
 import { loadMenus, createMenu, updateMenu, deleteMenu } from "../../../services/systemApi";
 import type { MenuDTO, CreateMenuRequest } from "../../../shared/types/system";
+import {
+  SystemConfirmDialog,
+  SystemNotice,
+  type ConfirmState,
+  type SystemNoticeState,
+  toErrorMessage
+} from "../components/SystemFeedback";
 
 interface MenuListPageProps {
   token: string;
@@ -13,6 +20,8 @@ export function MenuListPage({ token }: MenuListPageProps) {
   const [showEditDialog, setShowEditDialog] = useState(false);
   const [selectedMenu, setSelectedMenu] = useState<MenuDTO | null>(null);
   const [parentMenuId, setParentMenuId] = useState<number>(0);
+  const [notice, setNotice] = useState<SystemNoticeState>(null);
+  const [confirm, setConfirm] = useState<ConfirmState>(null);
   const [formData, setFormData] = useState<CreateMenuRequest>({
     parentId: 0,
     menuName: "",
@@ -46,7 +55,7 @@ export function MenuListPage({ token }: MenuListPageProps) {
       const menusData = await loadMenus();
       setMenus(menusData);
     } catch (error) {
-      console.error("加载数据失败:", error);
+      setNotice({ tone: "error", title: "加载数据失败", message: toErrorMessage(error, "请稍后重试") });
     } finally {
       setLoading(false);
     }
@@ -67,10 +76,10 @@ export function MenuListPage({ token }: MenuListPageProps) {
         sort: 0,
         visible: 1
       });
+      setNotice({ tone: "success", title: "菜单已创建" });
       loadData();
     } catch (error) {
-      console.error("创建菜单失败:", error);
-      alert("创建菜单失败");
+      setNotice({ tone: "error", title: "创建菜单失败", message: toErrorMessage(error, "请检查菜单信息") });
     }
   }
 
@@ -80,23 +89,32 @@ export function MenuListPage({ token }: MenuListPageProps) {
       await updateMenu(selectedMenu.id, editFormData);
       setShowEditDialog(false);
       setSelectedMenu(null);
+      setNotice({ tone: "success", title: "菜单已更新" });
       loadData();
     } catch (error) {
-      console.error("更新菜单失败:", error);
-      alert("更新菜单失败");
+      setNotice({ tone: "error", title: "更新菜单失败", message: toErrorMessage(error, "请稍后重试") });
     }
   }
 
-  async function handleDeleteMenu(menu: MenuDTO) {
-    if (!confirm(`确定要删除菜单 "${menu.menuName}" 吗？`)) {
-      return;
-    }
+  function handleDeleteMenu(menu: MenuDTO) {
+    setConfirm({
+      title: "删除菜单",
+      description: `确定要删除菜单「${menu.menuName}」吗？删除后关联入口可能无法访问。`,
+      actionLabel: "删除",
+      onConfirm: async () => {
+        setConfirm(null);
+        await deleteMenuWithNotice(menu);
+      }
+    });
+  }
+
+  async function deleteMenuWithNotice(menu: MenuDTO) {
     try {
       await deleteMenu(menu.id);
+      setNotice({ tone: "success", title: "菜单已删除" });
       loadData();
     } catch (error) {
-      console.error("删除菜单失败:", error);
-      alert("删除菜单失败");
+      setNotice({ tone: "error", title: "删除菜单失败", message: toErrorMessage(error, "请确认菜单没有被使用") });
     }
   }
 
@@ -173,6 +191,8 @@ export function MenuListPage({ token }: MenuListPageProps) {
 
   return (
     <div className="page-container">
+      <SystemNotice notice={notice} onClose={() => setNotice(null)} />
+      <SystemConfirmDialog confirm={confirm} onOpenChange={(open) => !open && setConfirm(null)} />
       <div className="page-header">
         <h1>菜单管理</h1>
         <button className="btn btn-primary" onClick={() => openCreateDialog(0)}>

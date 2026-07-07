@@ -6,6 +6,7 @@ import Underline from "@tiptap/extension-underline";
 import Link from "@tiptap/extension-link";
 import { marked } from "marked";
 import { MarkdownRenderer } from "../../components/ui/MarkdownRenderer";
+import { loadUsers } from "../../services/systemApi";
 import {
   addSpaceMember,
   createChatSession,
@@ -14,6 +15,7 @@ import {
   deleteChatSession,
   deleteDocument,
   deleteKnowledgeSpace,
+  downloadOriginalDocument,
   getDocumentContent,
   listRecentSessions,
   loadKnowledgeSpace,
@@ -28,13 +30,14 @@ import {
   uploadDocument
 } from "../../services/workspaceApi";
 import { statusClass, statusLabel } from "../../shared/status";
-import type { Citation, DetailTab, DocumentStatus, KnowledgeDocument, KnowledgeSpace, RouteKey, UserInfo } from "../../shared/types/domain";
-import type { MenuDTO } from "../../shared/types/system";
+import type { ChatMessage, Citation, DetailTab, DocumentStatus, KnowledgeDocument, KnowledgeSpace, RouteKey, UserInfo } from "../../shared/types/domain";
+import type { MenuDTO, UserDTO } from "../../shared/types/system";
 import { UserListPage } from "../system/users/UserListPage";
 import { RoleListPage } from "../system/roles/RoleListPage";
 import { MenuListPage } from "../system/menus/MenuListPage";
 import { PermissionListPage } from "../system/permissions/PermissionListPage";
 import { NoPermissionPage } from "../../shared/components/NoPermissionPage";
+import { SystemConfirmDialog, type ConfirmState } from "../system/components/SystemFeedback";
 
 interface WorkspaceAppProps {
   token: string;
@@ -56,6 +59,7 @@ type BusyAction =
   | "save-online-document"
   | `upload-${number}`
   | `delete-document-${number}`
+  | `download-document-${number}`
   | `edit-document-${number}`
   | `view-document-${number}`
   | `reindex-document-${number}`
@@ -96,6 +100,8 @@ type DocumentPageState =
       mode: "edit";
     } & DocumentContentState);
 
+type AnswerMode = "strict" | "balanced" | "broad";
+
 export function WorkspaceApp({ token, user, permissions, menus, onLogout }: WorkspaceAppProps) {
   const [route, setRoute] = useState<RouteKey>("spaces");
   const [activeSpaceId, setActiveSpaceId] = useState<number | null>(null);
@@ -109,6 +115,9 @@ export function WorkspaceApp({ token, user, permissions, menus, onLogout }: Work
   const [loading, setLoading] = useState(true);
   const [apiError, setApiError] = useState("");
   const [busyActions, setBusyActions] = useState<Set<BusyAction>>(new Set());
+  const [userDirectory, setUserDirectory] = useState<UserDTO[]>([]);
+  const [userDirectoryError, setUserDirectoryError] = useState("");
+  const [confirm, setConfirm] = useState<ConfirmState>(null);
 
   const displayName = user.displayName || user.username || "管理员";
 
@@ -129,6 +138,41 @@ export function WorkspaceApp({ token, user, permissions, menus, onLogout }: Work
     refreshWorkspace();
   }, [token]);
 
+  useEffect(() => {
+    if (!permissions.includes("user:view")) {
+      setUserDirectory([]);
+      setUserDirectoryError("");
+      return;
+    }
+
+    let cancelled = false;
+    loadUsers()
+      .then((users) => {
+        if (!cancelled) {
+          setUserDirectory(users);
+          setUserDirectoryError("");
+        }
+      })
+      .catch((error) => {
+        if (!cancelled) {
+          setUserDirectory([]);
+          setUserDirectoryError(errorMessage(error));
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [token, permissions]);
+
+  useEffect(() => {
+    if (!processingDocuments.length || loading) return;
+    const timer = window.setInterval(() => {
+      refreshWorkspace(true);
+    }, 6000);
+    return () => window.clearInterval(timer);
+  }, [processingDocuments.length, loading, token]);
+
   async function runBusy<T>(action: BusyAction, task: () => Promise<T>) {
     setBusyActions((current) => new Set(current).add(action));
     try {
@@ -142,8 +186,10 @@ export function WorkspaceApp({ token, user, permissions, menus, onLogout }: Work
     }
   }
 
-  async function refreshWorkspace() {
-    setLoading(true);
+  async function refreshWorkspace(silent = false) {
+    if (!silent) {
+      setLoading(true);
+    }
     setApiError("");
     try {
       const [nextSpaces, sessions] = await Promise.all([
@@ -159,7 +205,9 @@ export function WorkspaceApp({ token, user, permissions, menus, onLogout }: Work
     } catch (error) {
       setApiError(errorMessage(error));
     } finally {
-      setLoading(false);
+      if (!silent) {
+        setLoading(false);
+      }
     }
   }
 
@@ -251,19 +299,30 @@ export function WorkspaceApp({ token, user, permissions, menus, onLogout }: Work
     }
   }
 
-  async function handleDeleteSpace() {
-    if (!activeSpace || isBusy("delete-space")) return;
-    if (!window.confirm(`确认删除知识库「${activeSpace.name}」吗？`)) return;
+  async function deleteSpaceConfirmed(spaceId: number) {
     setApiError("");
     try {
-      await runBusy("delete-space", () => deleteKnowledgeSpace(token, activeSpace.id));
-      setSpaces((current) => current.filter((space) => space.id !== activeSpace.id));
-      setActiveSpaceId(null);
-      setActiveSessionId(null);
-      setCitation(null);
+      await runBusy("delete-space", () => deleteKnowledgeSpace(token, spaceId));
+      setSpaces((current) => current.filter((space) => space.id !== spaceId));
+      if (activeSpaceId === spaceId) {
+        setActiveSpaceId(null);
+        setActiveSessionId(null);
+        setCitation(null);
+      }
     } catch (error) {
       setApiError(errorMessage(error));
     }
+  }
+
+  function handleDeleteSpace() {
+    if (!activeSpace || isBusy("delete-space")) return;
+    const space = activeSpace;
+    setConfirm({
+      title: `删除知识库「${space.name}」`,
+      description: "删除后，该知识库下的文档、成员配置和问答会话都将不可恢复。",
+      actionLabel: "删除",
+      onConfirm: () => deleteSpaceConfirmed(space.id)
+    });
   }
 
   async function addMember(event: FormEvent<HTMLFormElement>) {
@@ -300,6 +359,10 @@ export function WorkspaceApp({ token, user, permissions, menus, onLogout }: Work
 
   async function createSession() {
     if (!activeSpace || isBusy("create-session")) return null;
+    if (!permissions.includes("qa:create")) {
+      setApiError("当前账号没有创建问答会话权限");
+      return null;
+    }
     setApiError("");
     try {
       const session = await runBusy("create-session", () => createChatSession(token, activeSpace.id));
@@ -315,6 +378,10 @@ export function WorkspaceApp({ token, user, permissions, menus, onLogout }: Work
 
   async function renameSession(sessionId: number, newTitle: string) {
     if (!activeSpace) return;
+    if (!permissions.includes("qa:update")) {
+      setApiError("当前账号没有编辑问答会话权限");
+      return;
+    }
     setApiError("");
     try {
       await updateChatSession(token, sessionId, newTitle);
@@ -329,9 +396,8 @@ export function WorkspaceApp({ token, user, permissions, menus, onLogout }: Work
     }
   }
 
-  async function removeSession(sessionId: number) {
+  async function deleteSessionConfirmed(sessionId: number) {
     if (!activeSpace) return;
-    if (!window.confirm("确定删除这个会话吗？")) return;
     setApiError("");
     try {
       await deleteChatSession(token, sessionId);
@@ -346,6 +412,21 @@ export function WorkspaceApp({ token, user, permissions, menus, onLogout }: Work
     } catch (error) {
       setApiError(errorMessage(error));
     }
+  }
+
+  function removeSession(sessionId: number) {
+    if (!activeSpace) return;
+    if (!permissions.includes("qa:delete")) {
+      setApiError("当前账号没有删除问答会话权限");
+      return;
+    }
+    const session = activeSpace.sessions?.find((item) => item.id === sessionId);
+    setConfirm({
+      title: "删除会话",
+      description: `确认删除「${session?.title || "这个会话"}」吗？删除后会话记录不可恢复。`,
+      actionLabel: "删除",
+      onConfirm: () => deleteSessionConfirmed(sessionId)
+    });
   }
 
   async function sendQuestion(event: FormEvent<HTMLFormElement>) {
@@ -487,6 +568,25 @@ export function WorkspaceApp({ token, user, permissions, menus, onLogout }: Work
     }
   }
 
+  async function handleDownloadDocumentSource(documentId: number, fileName: string) {
+    if (!permissions.includes("document:download")) {
+      setApiError("当前账号没有下载原文权限");
+      return;
+    }
+    const action: BusyAction = `download-document-${documentId}`;
+    if (isBusy(action)) return;
+    setApiError("");
+    try {
+      await runBusy(action, () => downloadOriginalDocument(token, documentId, fileName));
+    } catch (error) {
+      setApiError(errorMessage(error));
+    }
+  }
+
+  async function handleDownloadDocument(document: KnowledgeDocument) {
+    await handleDownloadDocumentSource(document.id, document.fileName);
+  }
+
   const title = documentPage ? documentPage.title : route === "recent" ? "最近问答" : activeSpace ? activeSpace.name : "知识库";
   const editingDocument = documentPage?.mode === "create" || documentPage?.mode === "edit";
 
@@ -530,6 +630,7 @@ export function WorkspaceApp({ token, user, permissions, menus, onLogout }: Work
       <section className={editingDocument ? "workspace document-workspace" : "workspace"}>
 
         {apiError ? <div className="notice error">{apiError}</div> : null}
+        <SystemConfirmDialog confirm={confirm} onOpenChange={(open) => !open && setConfirm(null)} />
         {loading ? <EmptyState title="正在加载知识库数据" text="正在读取当前账号可访问的知识库、文档和会话。" /> : null}
 
         {!loading && route === "spaces" && !activeSpace ? (
@@ -570,11 +671,15 @@ export function WorkspaceApp({ token, user, permissions, menus, onLogout }: Work
             citation={citation}
             busyActions={busyActions}
             permissions={permissions}
+            userDirectory={userDirectory}
+            userDirectoryError={userDirectoryError}
             onTabChange={setActiveTab}
             onUpload={addDocument}
             onCreateOnlineDocument={() => setDocumentPage({ mode: "create", title: "未命名文档", content: "", fileType: "MARKDOWN" })}
             onViewDocument={openViewDocument}
             onEditOnlineDocument={openEditOnlineDocument}
+            onDownloadDocument={handleDownloadDocument}
+            onDownloadSource={handleDownloadDocumentSource}
             onDeleteDocument={handleDeleteDocument}
             onReindexDocument={handleReindexDocument}
             onRefresh={refreshActiveSpace}
@@ -800,11 +905,15 @@ function SpaceDetail({
   citation,
   busyActions,
   permissions,
+  userDirectory,
+  userDirectoryError,
   onTabChange,
   onUpload,
   onCreateOnlineDocument,
   onViewDocument,
   onEditOnlineDocument,
+  onDownloadDocument,
+  onDownloadSource,
   onDeleteDocument,
   onReindexDocument,
   onRefresh,
@@ -825,11 +934,15 @@ function SpaceDetail({
   citation: Citation | null;
   busyActions: Set<BusyAction>;
   permissions: string[];
+  userDirectory: UserDTO[];
+  userDirectoryError: string;
   onTabChange: (tab: DetailTab) => void;
   onUpload: (file: File) => void;
   onCreateOnlineDocument: () => void;
   onViewDocument: (document: KnowledgeDocument) => void;
   onEditOnlineDocument: (document: KnowledgeDocument) => void;
+  onDownloadDocument: (document: KnowledgeDocument) => void;
+  onDownloadSource: (documentId: number, fileName: string) => void;
   onDeleteDocument: (documentId: number) => void;
   onReindexDocument: (documentId: number) => void;
   onRefresh: () => void;
@@ -873,6 +986,7 @@ function SpaceDetail({
             onCreateOnlineDocument={onCreateOnlineDocument}
             onViewDocument={onViewDocument}
             onEditOnlineDocument={onEditOnlineDocument}
+            onDownloadDocument={onDownloadDocument}
             onDelete={onDeleteDocument}
             onReindex={onReindexDocument}
             onRefresh={onRefresh}
@@ -890,11 +1004,25 @@ function SpaceDetail({
             onDeleteSession={onDeleteSession}
             onSubmitQuestion={onSubmitQuestion}
             onSelectCitation={onSelectCitation}
+            onDownloadSource={onDownloadSource}
+            onViewSourceDocument={onViewDocument}
+            canCreateSession={hasPermission("qa:create")}
+            canUpdateSession={hasPermission("qa:update")}
+            canDeleteSession={hasPermission("qa:delete")}
+            canDownloadSource={hasPermission("document:download")}
             citation={citation}
           />
         ) : null}
         {activeTab === "members" ? (
-          <MembersTab space={space} adding={busyActions.has("add-member")} busyActions={busyActions} onAddMember={onAddMember} onRemoveMember={onRemoveMember} />
+          <MembersTab
+            space={space}
+            users={userDirectory}
+            userDirectoryError={userDirectoryError}
+            adding={busyActions.has("add-member")}
+            busyActions={busyActions}
+            onAddMember={onAddMember}
+            onRemoveMember={onRemoveMember}
+          />
         ) : null}
         {activeTab === "settings" ? (
           <SettingsTab
@@ -986,6 +1114,7 @@ function DocumentsTab({
   onCreateOnlineDocument,
   onViewDocument,
   onEditOnlineDocument,
+  onDownloadDocument,
   onDelete,
   onReindex,
   onRefresh
@@ -999,6 +1128,7 @@ function DocumentsTab({
   onCreateOnlineDocument: () => void;
   onViewDocument: (document: KnowledgeDocument) => void;
   onEditOnlineDocument: (document: KnowledgeDocument) => void;
+  onDownloadDocument: (document: KnowledgeDocument) => void;
   onDelete: (documentId: number) => void;
   onReindex: (documentId: number) => void;
   onRefresh: () => void;
@@ -1016,7 +1146,7 @@ function DocumentsTab({
       <div className="section-header">
         <div>
           <h3>文档</h3>
-          <p>支持 PDF、TXT、Markdown。上传或重建后会完成解析、切片、分片落库，并写入 Qdrant 向量索引。</p>
+          <p>当前支持 PDF、TXT、Markdown。上传或重建后会完成解析、切片、分片落库，并写入 Qdrant 向量索引。</p>
         </div>
         <button className="secondary-btn" type="button" onClick={onRefresh} disabled={refreshing}>
           {refreshing ? "刷新中" : "刷新状态"}
@@ -1072,12 +1202,18 @@ function DocumentsTab({
               const reindexing = busyActions.has(`reindex-document-${doc.id}`);
               const editing = busyActions.has(`edit-document-${doc.id}`);
               const viewing = busyActions.has(`view-document-${doc.id}`);
+              const downloading = busyActions.has(`download-document-${doc.id}`);
               const editable = doc.fileType === "MARKDOWN";
               return (
                 <tr key={doc.id}>
                   <td>
                     <strong>{doc.fileName}</strong>
-                    {doc.errorMessage ? <div className="inline-error">{doc.errorMessage}</div> : null}
+                    {doc.errorMessage ? (
+                      <div className="inline-error">
+                        <strong>{doc.errorMessage}</strong>
+                        <span>{documentFailureAdvice(doc.errorMessage)}</span>
+                      </div>
+                    ) : null}
                   </td>
                   <td><span className={`file-type ${fileTypeClass(doc.fileType)}`}>{fileTypeLabel(doc.fileType)}</span></td>
                   <td>{doc.fileSize}</td>
@@ -1089,6 +1225,11 @@ function DocumentsTab({
                       <button className="link-btn" type="button" onClick={() => onViewDocument(doc)} disabled={viewing || editing || reindexing || deleting}>
                         {viewing ? "打开中" : "查看"}
                       </button>
+                      {hasPermission("document:download") ? (
+                        <button className="link-btn" type="button" onClick={() => onDownloadDocument(doc)} disabled={downloading || deleting}>
+                          {downloading ? "下载中" : "下载原文"}
+                        </button>
+                      ) : null}
                       {editable && hasPermission("document:update") ? (
                         <button className="link-btn" type="button" onClick={() => onEditOnlineDocument(doc)} disabled={editing || reindexing || deleting}>
                           {editing ? "打开中" : "编辑"}
@@ -1157,7 +1298,7 @@ function UploadZone({ uploading, onUpload }: { uploading: boolean; onUpload: (fi
         onChange={(event) => event.target.files?.[0] && onUpload(event.target.files[0])}
       />
       <strong>{uploading ? "正在上传文档" : "拖拽文件到这里，或点击选择文档"}</strong>
-      <span>支持 PDF、TXT、Markdown。上传后可在列表中刷新处理状态。</span>
+      <span>当前支持 PDF、TXT、Markdown；Word 文档将在后续版本支持。</span>
     </label>
   );
 }
@@ -1181,6 +1322,23 @@ function DocumentPage({
     return <DocumentReadPage page={page} onEdit={onEdit} onBack={onBack} />;
   }
   return <DocumentEditPage page={page} saving={saving} onChange={onChange} onSubmit={onSubmit} onBack={onBack} />;
+}
+
+function documentFailureAdvice(errorMessage: string) {
+  const message = errorMessage.toLowerCase();
+  if (message.includes("内容为空") || message.includes("blank") || message.includes("empty")) {
+    return "建议：确认文件不是空文档；如果是扫描版 PDF，需要先转换为可复制文本后再上传。";
+  }
+  if (message.includes("暂不支持") || message.includes("不支持")) {
+    return "建议：当前上传 PDF、TXT 或 Markdown；Word、Excel、PPT 请先转为支持格式。";
+  }
+  if (message.includes("vector") || message.includes("向量") || message.includes("qdrant") || message.includes("milvus")) {
+    return "建议：向量服务可能不可用，稍后点击重建；如果持续失败，请检查向量库和模型配置。";
+  }
+  if (message.includes("读取") || message.includes("解析") || message.includes("pdf")) {
+    return "建议：重新导出文件后上传；复杂表格、加密文件或扫描件可能无法稳定解析。";
+  }
+  return "建议：先点击重建索引；如果仍失败，请重新上传文件或联系管理员查看服务日志。";
 }
 
 function DocumentReadPage({
@@ -1614,6 +1772,12 @@ function ChatTab({
   onDeleteSession,
   onSubmitQuestion,
   onSelectCitation,
+  onDownloadSource,
+  onViewSourceDocument,
+  canCreateSession,
+  canUpdateSession,
+  canDeleteSession,
+  canDownloadSource,
   citation
 }: {
   space: KnowledgeSpace;
@@ -1626,9 +1790,17 @@ function ChatTab({
   onDeleteSession: (sessionId: number) => void;
   onSubmitQuestion: (event: FormEvent<HTMLFormElement>) => void;
   onSelectCitation: (citation: Citation) => void;
+  onDownloadSource: (documentId: number, fileName: string) => void;
+  onViewSourceDocument: (document: KnowledgeDocument) => void;
+  canCreateSession: boolean;
+  canUpdateSession: boolean;
+  canDeleteSession: boolean;
+  canDownloadSource: boolean;
   citation: Citation | null;
 }) {
   const session = (space.sessions ?? []).find((item) => item.id === activeSessionId) || space.sessions?.[0];
+  const noCitationNote = buildNoCitationNote(space);
+  const citationDocument = citation ? (space.documents ?? []).find((doc) => doc.id === citation.documentId) : null;
   const [editingSessionId, setEditingSessionId] = useState<number | null>(null);
   const [editTitle, setEditTitle] = useState("");
   const messageListRef = useRef<HTMLDivElement>(null);
@@ -1663,9 +1835,11 @@ function ChatTab({
       <aside className="surface session-panel">
         <div className="section-header compact">
           <h3>会话</h3>
-          <button className="icon-btn" title="新建会话" type="button" onClick={onCreateSession} disabled={creatingSession}>
-            +
-          </button>
+          {canCreateSession ? (
+            <button className="icon-btn" title="新建会话" type="button" onClick={onCreateSession} disabled={creatingSession}>
+              +
+            </button>
+          ) : null}
         </div>
         <div className="session-list">
           {(space.sessions ?? []).map((item) => (
@@ -1691,30 +1865,36 @@ function ChatTab({
                     <strong>{item.title}</strong>
                     <span>{item.updatedAt}</span>
                   </div>
-                  <div className="session-item-actions">
-                    <button
-                      className="session-action-btn"
-                      type="button"
-                      title="重命名"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        handleStartRename(item.id, item.title);
-                      }}
-                    >
-                      ✏️
-                    </button>
-                    <button
-                      className="session-action-btn"
-                      type="button"
-                      title="删除"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        onDeleteSession(item.id);
-                      }}
-                    >
-                      🗑️
-                    </button>
-                  </div>
+                  {canUpdateSession || canDeleteSession ? (
+                    <div className="session-item-actions">
+                      {canUpdateSession ? (
+                        <button
+                          className="session-action-btn"
+                          type="button"
+                          title="重命名"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleStartRename(item.id, item.title);
+                          }}
+                        >
+                          ✏️
+                        </button>
+                      ) : null}
+                      {canDeleteSession ? (
+                        <button
+                          className="session-action-btn"
+                          type="button"
+                          title="删除"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            onDeleteSession(item.id);
+                          }}
+                        >
+                          🗑️
+                        </button>
+                      ) : null}
+                    </div>
+                  ) : null}
                 </button>
               )}
             </div>
@@ -1732,9 +1912,7 @@ function ChatTab({
               ) : (
                 <div>{message.content}</div>
               )}
-              {message.role === "assistant" && !message.citations?.length ? (
-                <p className="message-note">未返回引用来源。知识库中没有匹配片段，或相关文档尚未完成索引时，可能出现这种情况。</p>
-              ) : null}
+              {message.role === "assistant" ? <RetrievalNote message={message} space={space} fallbackText={noCitationNote} /> : null}
               {message.citations?.length ? (
                 <div className="citation-list">
                   {message.citations.map((item) => (
@@ -1747,6 +1925,12 @@ function ChatTab({
             </article>
           ))}
           {!session ? <EmptyState title="暂无会话" text="先新建一个会话，再询问当前知识库内容。" compact /> : null}
+          {sending ? (
+            <article className="message assistant pending">
+              <strong>正在检索知识库并生成回答</strong>
+              <p className="message-note">会优先查找当前知识库中已完成索引的文档，并在回答后附上引用来源。</p>
+            </article>
+          ) : null}
         </div>
         <form className="chat-input-row" onSubmit={onSubmitQuestion}>
           <input name="question" placeholder="询问当前知识库内容" disabled={sending} />
@@ -1762,12 +1946,29 @@ function ChatTab({
         </div>
         {citation ? (
           <article className="citation-card">
-            <h4>{citation.documentName}</h4>
+            <div className="citation-card-head">
+              <h4>{citation.documentName}</h4>
+              <div className="citation-card-actions">
+                {citationDocument ? (
+                  <button className="link-btn" type="button" onClick={() => onViewSourceDocument(citationDocument)}>
+                    查看解析文本
+                  </button>
+                ) : null}
+                {canDownloadSource ? (
+                  <button className="link-btn" type="button" onClick={() => onDownloadSource(citation.documentId, citation.documentName)}>
+                    下载原文
+                  </button>
+                ) : null}
+              </div>
+            </div>
             <div className="card-meta">
               <span className="pill">页码 {citation.pageNumber || "-"}</span>
               <span className="pill">分片 {citation.chunkIndex}</span>
               <span className="pill success">相似度 {citation.score.toFixed(6)}</span>
             </div>
+            <p className="citation-locator">
+              核验定位：优先查看原文第 {citation.pageNumber || "-"} 页；若原文页码不可用，可在解析文本中搜索下方引用片段或定位分片 {citation.chunkIndex}。
+            </p>
             <MarkdownRenderer content={citation.quoteText} className="quote-box" />
           </article>
         ) : (
@@ -1780,17 +1981,32 @@ function ChatTab({
 
 function MembersTab({
   space,
+  users,
+  userDirectoryError,
   adding,
   busyActions,
   onAddMember,
   onRemoveMember
 }: {
   space: KnowledgeSpace;
+  users: UserDTO[];
+  userDirectoryError: string;
   adding: boolean;
   busyActions: Set<BusyAction>;
   onAddMember: (event: FormEvent<HTMLFormElement>) => void;
   onRemoveMember: (memberId: number) => void;
 }) {
+  const [keyword, setKeyword] = useState("");
+  const memberIds = new Set((space.members ?? []).map((member) => member.id));
+  const availableUsers = users
+    .filter((item) => item.status !== "DISABLED" && !memberIds.has(item.id))
+    .filter((item) => {
+      const query = keyword.trim().toLowerCase();
+      if (!query) return true;
+      return `${item.displayName} ${item.username} ${item.email ?? ""}`.toLowerCase().includes(query);
+    })
+    .slice(0, 20);
+
   return (
     <section className="surface">
       <div className="section-header">
@@ -1800,10 +2016,25 @@ function MembersTab({
         </div>
       </div>
       <form className="member-form" onSubmit={onAddMember}>
-        <label>
-          用户 ID
-          <input name="userId" type="number" min="1" placeholder="输入已存在用户 ID" />
-        </label>
+        {users.length ? (
+          <label className="member-picker">
+            成员
+            <input value={keyword} onChange={(event) => setKeyword(event.target.value)} placeholder="搜索姓名、用户名或邮箱" />
+            <select name="userId" required defaultValue="">
+              <option value="" disabled>选择要加入的用户</option>
+              {availableUsers.map((item) => (
+                <option key={item.id} value={item.id}>
+                  {item.displayName || item.username}（{item.username}）
+                </option>
+              ))}
+            </select>
+          </label>
+        ) : (
+          <label>
+            用户 ID
+            <input name="userId" type="number" min="1" placeholder="输入已存在用户 ID" />
+          </label>
+        )}
         <label>
           角色
           <select name="role" defaultValue="READER">
@@ -1815,6 +2046,12 @@ function MembersTab({
           {adding ? "添加中" : "添加成员"}
         </button>
       </form>
+      {userDirectoryError ? (
+        <p className="helper-note">暂时无法读取用户列表，可继续用用户 ID 添加成员。</p>
+      ) : null}
+      {users.length && !availableUsers.length ? (
+        <p className="helper-note">没有匹配的可添加用户，可能已在成员列表中或账号已停用。</p>
+      ) : null}
       <div className="member-grid">
         {(space.members ?? []).map((member) => {
           const removing = busyActions.has(`remove-member-${member.id}`);
@@ -1842,6 +2079,36 @@ function MembersTab({
   );
 }
 
+function answerModePreset(mode: AnswerMode) {
+  if (mode === "strict") {
+    return { topK: 3, threshold: 0.78, temperature: 0.1 };
+  }
+  if (mode === "broad") {
+    return { topK: 8, threshold: 0.55, temperature: 0.35 };
+  }
+  return { topK: 5, threshold: 0.7, temperature: 0.2 };
+}
+
+function answerModeMeta(mode: AnswerMode) {
+  if (mode === "strict") {
+    return { label: "严格", description: "更重视准确性，只引用高相关资料。" };
+  }
+  if (mode === "broad") {
+    return { label: "宽松", description: "扩大检索范围，适合资料分散或提问较模糊。" };
+  }
+  return { label: "平衡", description: "兼顾引用质量和覆盖范围，适合日常问答。" };
+}
+
+function inferAnswerMode(space: KnowledgeSpace): AnswerMode {
+  if (space.threshold >= 0.75 && space.topK <= 4 && space.temperature <= 0.15) {
+    return "strict";
+  }
+  if (space.threshold <= 0.6 || space.topK >= 7 || space.temperature >= 0.3) {
+    return "broad";
+  }
+  return "balanced";
+}
+
 function SettingsTab({
   space,
   saving,
@@ -1855,6 +2122,20 @@ function SettingsTab({
   onSubmit: (event: FormEvent<HTMLFormElement>) => void;
   onDelete: () => void;
 }) {
+  const initialMode = inferAnswerMode(space);
+  const [answerMode, setAnswerMode] = useState<AnswerMode>(initialMode);
+  const [advancedOpen, setAdvancedOpen] = useState(false);
+  const [params, setParams] = useState(() => ({
+    topK: space.topK,
+    threshold: space.threshold,
+    temperature: space.temperature
+  }));
+
+  function applyAnswerMode(mode: AnswerMode) {
+    setAnswerMode(mode);
+    setParams(answerModePreset(mode));
+  }
+
   return (
     <section className="settings-layout">
       <section className="surface">
@@ -1877,18 +2158,73 @@ function SettingsTab({
               <option value="INTERNAL">企业内部</option>
             </select>
           </label>
-          <label>
-            TopK
-            <input name="topK" type="number" min="1" max="20" defaultValue={space.topK} />
-          </label>
-          <label>
-            相似度阈值
-            <input name="threshold" type="number" min="0" max="1" step="0.01" defaultValue={space.threshold} />
-          </label>
-          <label>
-            温度
-            <input name="temperature" type="number" min="0" max="1" step="0.01" defaultValue={space.temperature} />
-          </label>
+          <div className="answer-mode-field">
+            <span className="field-label">回答模式</span>
+            <div className="answer-mode-options" role="radiogroup" aria-label="回答模式">
+              {(["strict", "balanced", "broad"] as AnswerMode[]).map((mode) => {
+                const meta = answerModeMeta(mode);
+                return (
+                  <button
+                    key={mode}
+                    className={`mode-option ${answerMode === mode ? "active" : ""}`}
+                    type="button"
+                    onClick={() => applyAnswerMode(mode)}
+                  >
+                    <strong>{meta.label}</strong>
+                    <span>{meta.description}</span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+          <button className="link-btn advanced-toggle" type="button" onClick={() => setAdvancedOpen((open) => !open)}>
+            {advancedOpen ? "收起高级参数" : "展开高级参数"}
+          </button>
+          {advancedOpen ? (
+            <div className="advanced-settings">
+              <label>
+                引用片段数
+                <input
+                  name="topK"
+                  type="number"
+                  min="1"
+                  max="20"
+                  value={params.topK}
+                  onChange={(event) => setParams((current) => ({ ...current, topK: Number(event.target.value) }))}
+                />
+              </label>
+              <label>
+                命中阈值
+                <input
+                  name="threshold"
+                  type="number"
+                  min="0"
+                  max="1"
+                  step="0.01"
+                  value={params.threshold}
+                  onChange={(event) => setParams((current) => ({ ...current, threshold: Number(event.target.value) }))}
+                />
+              </label>
+              <label>
+                发散程度
+                <input
+                  name="temperature"
+                  type="number"
+                  min="0"
+                  max="1"
+                  step="0.01"
+                  value={params.temperature}
+                  onChange={(event) => setParams((current) => ({ ...current, temperature: Number(event.target.value) }))}
+                />
+              </label>
+            </div>
+          ) : (
+            <>
+              <input type="hidden" name="topK" value={params.topK} />
+              <input type="hidden" name="threshold" value={params.threshold} />
+              <input type="hidden" name="temperature" value={params.temperature} />
+            </>
+          )}
           <div className="settings-actions">
             <button className="primary-btn" type="submit" disabled={saving}>
               {saving ? "保存中" : "保存配置"}
@@ -1962,8 +2298,65 @@ function EmptyState({
   );
 }
 
+function RetrievalNote({
+  message,
+  space,
+  fallbackText
+}: {
+  message: ChatMessage;
+  space: KnowledgeSpace;
+  fallbackText: string;
+}) {
+  const citations = message.citations ?? [];
+  if (!citations.length) {
+    return <p className="message-note warning">无答案原因：{fallbackText}</p>;
+  }
+
+  const uniqueDocuments = new Set(citations.map((item) => item.documentId)).size;
+  const bestScore = Math.max(...citations.map((item) => item.score));
+  const threshold = space.threshold ?? 0.7;
+
+  if (bestScore < threshold) {
+    return (
+      <p className="message-note warning">
+        低命中：最相关片段相似度 {bestScore.toFixed(3)}，低于当前阈值 {threshold.toFixed(2)}。建议核对引用，或补充更贴近问题的资料。
+      </p>
+    );
+  }
+
+  return (
+    <p className="message-note info">
+      已命中：从 {uniqueDocuments} 个文档中找到 {citations.length} 个引用片段，最高相似度 {bestScore.toFixed(3)}。
+    </p>
+  );
+}
+
 function isProcessingStatus(status: DocumentStatus) {
   return status === "PENDING" || status === "PARSING" || status === "INDEXING";
+}
+
+function buildNoCitationNote(space: KnowledgeSpace) {
+  const documents = space.documents ?? [];
+  const completed = documents.filter((doc) => doc.status === "COMPLETED").length;
+  const processing = documents.filter((doc) => isProcessingStatus(doc.status)).length;
+  const failed = documents.filter((doc) => doc.status === "FAILED").length;
+
+  if (!documents.length) {
+    return "当前知识库还没有文档。请先上传 PDF、TXT 或 Markdown，并等待索引完成后再提问。";
+  }
+  if (!completed && processing) {
+    return `索引未完成。当前有 ${processing} 个文档仍在处理，暂时不会参与检索；处理完成后再次提问可获得引用来源。`;
+  }
+  if (!completed && failed) {
+    return `索引失败。当前 ${failed} 个文档索引失败，知识库暂无可检索内容；请在文档页查看失败原因并重建索引。`;
+  }
+  if (processing) {
+    return `索引未完全完成。已检索 ${completed} 个完成索引的文档；另有 ${processing} 个文档仍在处理，暂未参与本次回答。`;
+  }
+  if (failed) {
+    return `已检索 ${completed} 个完成索引的文档，但没有命中可引用片段；另有 ${failed} 个失败文档可在文档页处理。`;
+  }
+  return "已检索当前知识库中完成索引的文档，但相似度未达到可引用标准。可以换一种问法，或补充更相关的资料后再试。";
 }
 
 function visibilityLabel(visibility: KnowledgeSpace["visibility"]) {
