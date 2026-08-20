@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
+import { ErrorBoundary } from "../components/ErrorBoundary";
 import { LoginPage } from "../features/auth/LoginPage";
 import { WorkspaceApp } from "../features/workspace/WorkspaceApp";
-import { AUTH_REQUIRED_EVENT, clearAuthSession, readAuthSession, saveAuthSession } from "../services/authSession";
+import { AUTH_REQUIRED_EVENT, logout, readAuthSession, saveAuthSession } from "../services/authSession";
 import type { LoginResponse, UserInfo } from "../shared/types/domain";
 import type { MenuDTO } from "../shared/types/system";
 
@@ -16,8 +17,8 @@ export function App() {
     setSession(loginData);
   }
 
-  function handleLogout() {
-    clearAuthSession();
+  async function handleLogout() {
+    await logout();
     setSession(null);
     window.history.replaceState(null, "", "/");
   }
@@ -32,16 +33,22 @@ export function App() {
   }, []);
 
   if (!session) {
-    return <LoginPage onLogin={handleLogin} />;
+    return (
+      <ErrorBoundary>
+        <LoginPage onLogin={handleLogin} />
+      </ErrorBoundary>
+    );
   }
 
   return (
-    <WorkspaceApp
-      token={session.accessToken}
-      user={user}
-      permissions={permissions}
-      menus={menus}
-      onLogout={handleLogout}
-    />
+    <ErrorBoundary>
+      <WorkspaceApp
+        token={session.accessToken}
+        user={user}
+        permissions={permissions}
+        menus={menus}
+        onLogout={handleLogout}
+      />
+    </ErrorBoundary>
   );
 }

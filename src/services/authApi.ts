@@ -26,3 +26,22 @@ export async function loginWithPassword(username: string, password: string): Pro
 
   return payload.data;
 }
+
+/**
+ * 用户登出
+ * 调用后端接口将 Token 加入黑名单
+ */
+export async function logoutFromServer(token: string): Promise<void> {
+  try {
+    await fetch(`${appConfig.apiBaseUrl}/api/auth/logout`, {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${token}`,
+        "Content-Type": "application/json"
+      }
+    });
+  } catch {
+    // 登出接口失败不影响客户端清除 Token
+    console.warn("登出接口调用失败，客户端仍将清除本地 Token");
+  }
+}

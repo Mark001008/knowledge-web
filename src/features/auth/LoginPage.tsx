@@ -1,5 +1,6 @@
 import { type FormEvent, useState } from "react";
 import { loginWithPassword } from "../../services/authApi";
+import { getRememberedUsername } from "../../services/authSession";
 import type { LoginResponse } from "../../shared/types/domain";
 
 interface LoginPageProps {
@@ -7,9 +8,9 @@ interface LoginPageProps {
 }
 
 export function LoginPage({ onLogin }: LoginPageProps) {
-  const [username, setUsername] = useState("");
+  const [username, setUsername] = useState(() => getRememberedUsername() || "");
   const [password, setPassword] = useState("");
-  const [remember, setRemember] = useState(true);
+  const [remember, setRemember] = useState(() => !!getRememberedUsername());
   const [error, setError] = useState("");
   const [submitting, setSubmitting] = useState(false);
 
@@ -67,7 +68,7 @@ export function LoginPage({ onLogin }: LoginPageProps) {
             <div className="login-options">
               <label className="check-row">
                 <input type="checkbox" checked={remember} onChange={(event) => setRemember(event.target.checked)} />
-                <span>保持登录</span>
+                <span>记住用户名</span>
               </label>
             </div>
             {error ? <p className="form-error">{error}</p> : null}
