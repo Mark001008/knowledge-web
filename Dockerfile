@@ -2,7 +2,7 @@ FROM docker.m.daocloud.io/library/node:22-alpine AS build
 WORKDIR /workspace
 
 COPY package*.json ./
-RUN npm ci
+RUN npm install
 
 COPY . .
 RUN npm run build
